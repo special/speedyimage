@@ -1,0 +1,7 @@
+.qmake.*
+Makefile
+*.o
+*.so
+*.moc
+moc_*
+NOTES
