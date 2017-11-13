@@ -8,7 +8,6 @@ class SpeedyImage : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QString source READ source WRITE setSource NOTIFY sourceChanged)
-    Q_PROPERTY(bool autoTransform READ autoTransform WRITE setAutoTransform NOTIFY autoTransformChanged)
     Q_PROPERTY(QSize imageSize READ imageSize NOTIFY imageSizeChanged)
     Q_PROPERTY(QSizeF paintedSize READ paintedSize NOTIFY paintedSizeChanged)
 
@@ -27,15 +26,11 @@ public:
     QString source() const;
     void setSource(const QString &source);
 
-    bool autoTransform() const;
-    void setAutoTransform(bool enabled);
-
     QSize imageSize() const;
     QSizeF paintedSize() const;
 
 signals:
     void sourceChanged();
-    void autoTransformChanged();
     void imageSizeChanged();
     void paintedSizeChanged();
 
