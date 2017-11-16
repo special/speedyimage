@@ -23,6 +23,13 @@ public:
 
     ImageTextureCacheEntry &operator=(const ImageTextureCacheEntry &o);
 
+    bool isNull() const { return !d; }
+    bool isEmpty() const { return image().isNull() && !texture(); }
+    void reset();
+
+    QImage image() const;
+    QSize loadedSize() const;
+    QSize imageSize() const;
     QSGTexture *texture() const;
 
 private:
@@ -49,7 +56,7 @@ public:
     void insert(const QString &key, const QImage &image, const QSize &imageSize);
 
 signals:
-    void changed(const QString &key, const ImageTextureCacheEntry &value);
+    void changed(const QString &key);
 
 private:
     std::shared_ptr<ImageTextureCachePrivate> d;

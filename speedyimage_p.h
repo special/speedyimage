@@ -2,6 +2,7 @@
 
 #include "speedyimage.h"
 #include "imageloader.h"
+#include "imagetexturecache.h"
 #include <memory>
 #include <QSGTexture>
 
@@ -14,11 +15,10 @@ public:
 
     QString source;
 
+    ImageTextureCache *imageCache;
+    ImageTextureCacheEntry cacheEntry;
     ImageLoaderJob loadJob;
 
-    std::unique_ptr<QSGTexture> texture;
-    QImage image;
-    QSize imageSize;
     QRectF paintRect;
 
     SpeedyImagePrivate(SpeedyImage *q);
@@ -26,10 +26,9 @@ public:
     void clearImage();
     void reloadImage();
     void calcPaintRect();
+    bool needsReloadForDrawSize();
 
 public slots:
-    void setImage(const QImage &img, const QSize &imageSize);
-
-signals:
-    void imageLoaded(const QImage &img, const QSize &imageSize);
+    void setWindow(QQuickWindow *window);
+    void cacheEntryChanged(const QString &key);
 };

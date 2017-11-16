@@ -35,6 +35,7 @@ ImageTextureCachePrivate::~ImageTextureCachePrivate()
 
 ImageTextureCacheEntry ImageTextureCache::get(const QString &key)
 {
+    QMutexLocker l(&d->mutex);
     auto data = d->cache.value(key);
     if (!data) {
         data = std::make_shared<ImageTextureCacheData>(d.get(), key);
@@ -48,13 +49,18 @@ void ImageTextureCache::insert(const QString &key, const QImage &image, const QS
     auto entry = get(key);
     entry.d->image = image;
     entry.d->imageSize = imageSize;
-    // XXX texture management
-    entry.d->texture = nullptr;
-    emit changed(key, entry);
+    // XXX smarter texture management
+    // XXX Atlas won't be used because this isn't done from render thread
+    // XXX needs lifetime management; supposed to free from the render thread
+    // XXX Use the window's post-render signal to schedule a call to check free list from render thread?
+    entry.d->texture = d->window->createTextureFromImage(image, {QQuickWindow::TextureCanUseAtlas, QQuickWindow::TextureIsOpaque});
+    Q_ASSERT(entry.d->texture);
+    emit changed(key);
 }
 
 void ImageTextureCachePrivate::setFreeable(const std::shared_ptr<ImageTextureCacheData> &data, bool set)
 {
+    // XXX Currently unused, and also not threadsafe; can't just reuse mutex because this can be called under mutex
     if (set) {
         freeable.append(data);
     } else {
@@ -96,6 +102,28 @@ ImageTextureCacheEntry &ImageTextureCacheEntry::operator=(const ImageTextureCach
             d->ref();
     }
     return *this;
+}
+
+void ImageTextureCacheEntry::reset()
+{
+    if (d)
+        d->deref();
+    d.reset();
+}
+
+QImage ImageTextureCacheEntry::image() const
+{
+    return d ? d->image : QImage();
+}
+
+QSize ImageTextureCacheEntry::loadedSize() const
+{
+    return d ? d->image.size() : QSize();
+}
+
+QSize ImageTextureCacheEntry::imageSize() const
+{
+    return d ? d->imageSize : QSize();
 }
 
 QSGTexture *ImageTextureCacheEntry::texture() const

@@ -3,6 +3,7 @@
 #include "imagetexturecache.h"
 #include <QAtomicInteger>
 #include <QImage>
+#include <QMutex>
 
 class ImageTextureCachePrivate
 {
@@ -10,6 +11,7 @@ public:
     static QHash<QQuickWindow*,ImageTextureCache*> instances;
     QQuickWindow *window;
 
+    QMutex mutex;
     QHash<QString,std::shared_ptr<ImageTextureCacheData>> cache;
     QVector<std::shared_ptr<ImageTextureCacheData>> freeable;
 
