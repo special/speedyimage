@@ -5,20 +5,26 @@
 #include <QImage>
 #include <QMutex>
 
-class ImageTextureCachePrivate
+class ImageTextureCachePrivate : public QObject
 {
+    Q_OBJECT
+
 public:
     static QHash<QQuickWindow*,ImageTextureCache*> instances;
     QQuickWindow *window;
 
     QMutex mutex;
     QHash<QString,std::shared_ptr<ImageTextureCacheData>> cache;
+    QMutex freeMutex;
     QVector<std::shared_ptr<ImageTextureCacheData>> freeable;
 
-    ImageTextureCachePrivate();
+    ImageTextureCachePrivate(QQuickWindow *window);
     ~ImageTextureCachePrivate();
 
     void setFreeable(const std::shared_ptr<ImageTextureCacheData> &data, bool freeable);
+
+public slots:
+    void renderThreadFree();
 };
 
 // Internal representation of data in the cache, referenced by
@@ -52,6 +58,11 @@ public:
         if (!refCount.deref()) {
             cache->setFreeable(shared_from_this(), true);
         }
+    }
+
+    int getRefCount()
+    {
+        return refCount.load();
     }
 
 private:

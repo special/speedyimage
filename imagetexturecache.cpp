@@ -1,4 +1,8 @@
 #include "imagetexturecache_p.h"
+#include <QLoggingCategory>
+#include <QSGTexture>
+
+Q_LOGGING_CATEGORY(lcCache, "speedyimage.cache")
 
 QHash<QQuickWindow*,ImageTextureCache*> ImageTextureCachePrivate::instances;
 
@@ -15,14 +19,14 @@ ImageTextureCache *ImageTextureCache::forWindow(QQuickWindow *window)
 
 ImageTextureCache::ImageTextureCache(QQuickWindow *window)
     : QObject(window)
-    , d(std::make_shared<ImageTextureCachePrivate>())
+    , d(std::make_shared<ImageTextureCachePrivate>(window))
 {
-    d->window = window;
 }
 
-ImageTextureCachePrivate::ImageTextureCachePrivate()
-    : window(nullptr)
+ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
+    : window(window)
 {
+    connect(window, &QQuickWindow::beforeSynchronizing, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
 }
 
 ImageTextureCache::~ImageTextureCache()
@@ -60,12 +64,40 @@ void ImageTextureCache::insert(const QString &key, const QImage &image, const QS
 
 void ImageTextureCachePrivate::setFreeable(const std::shared_ptr<ImageTextureCacheData> &data, bool set)
 {
-    // XXX Currently unused, and also not threadsafe; can't just reuse mutex because this can be called under mutex
+    QMutexLocker l(&freeMutex);
     if (set) {
         freeable.append(data);
     } else {
         freeable.removeOne(data);
     }
+}
+
+void ImageTextureCachePrivate::renderThreadFree()
+{
+    // XXX Cache size bounding and such
+
+    // XXX Is this a deadlock? pretty sure there's order inversion w/ creation (cache->free instead of free->cache)
+    // Is avoidance sufficient?
+    QMutexLocker freeLock(&freeMutex);
+    if (freeable.isEmpty())
+        return;
+
+    // There is no path for a data to go from 0 to 1 ref without holding the cache mutex,
+    // so holding it guarantees that data with 0 ref can be freed safely.
+    QMutexLocker cacheLock(&mutex);
+    for (const auto &data : freeable) {
+        Q_ASSERT(data->getRefCount() == 0);
+        Q_ASSERT(data->cache == this);
+        qCDebug(lcCache) << "cache freeing" << data->key;
+
+        delete data->texture;
+        data->texture = nullptr;
+
+        Q_ASSERT(cache.value(data->key) == data);
+        cache.remove(data->key);
+    }
+    cacheLock.unlock();
+    freeable.clear();
 }
 
 ImageTextureCacheEntry::ImageTextureCacheEntry()
