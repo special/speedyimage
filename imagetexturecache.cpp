@@ -60,10 +60,25 @@ void ImageTextureCache::insert(const QString &key, const QImage &image, const QS
     auto entry = get(key);
     entry.d->image = image;
     entry.d->imageSize = imageSize;
+    entry.d->error = QString();
     // XXX smarter texture management
     // XXX Atlas won't be used because this isn't done from render thread
+    // XXX overwrite of texture will leak
     entry.d->texture = d->window->createTextureFromImage(image, {QQuickWindow::TextureCanUseAtlas, QQuickWindow::TextureIsOpaque});
     Q_ASSERT(entry.d->texture);
+    entry.d->updateCost();
+
+    emit changed(key);
+}
+
+void ImageTextureCache::insert(const QString &key, const QString &error)
+{
+    auto entry = get(key);
+    entry.d->image = QImage();
+    entry.d->imageSize = QSize();
+    entry.d->error = error;
+    // XXX leak if texture exists
+    entry.d->texture = nullptr;
     entry.d->updateCost();
 
     emit changed(key);
@@ -178,6 +193,11 @@ void ImageTextureCacheEntry::reset()
 QImage ImageTextureCacheEntry::image() const
 {
     return d ? d->image : QImage();
+}
+
+QString ImageTextureCacheEntry::error() const
+{
+    return d ? d->error : QString();
 }
 
 QSize ImageTextureCacheEntry::loadedSize() const

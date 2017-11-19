@@ -28,6 +28,7 @@ public:
     void reset();
 
     QImage image() const;
+    QString error() const;
     QSize loadedSize() const;
     QSize imageSize() const;
     QSGTexture *texture() const;
@@ -54,6 +55,7 @@ public:
     ImageTextureCacheEntry get(const QString &key);
 
     void insert(const QString &key, const QImage &image, const QSize &imageSize);
+    void insert(const QString &key, const QString &error);
 
 signals:
     void changed(const QString &key);

@@ -20,6 +20,7 @@ SpeedyImage::SpeedyImage(QQuickItem *parent)
 
 SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     : q(q)
+    , status(SpeedyImage::Null)
     , imageCache(nullptr)
 {
     connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
@@ -41,10 +42,26 @@ void SpeedyImage::setSource(const QString &source)
 
     qCDebug(lcItem) << "set source:" << source;
     d->source = source;
-    emit sourceChanged();
 
     d->clearImage();
-    d->reloadImage();
+    d->status = Null;
+
+    if (!d->source.isEmpty()) {
+        // reloadImage will update status and signal if it has a cache entry immediately
+        d->reloadImage();
+        // Otherwise, we're still loading (or waiting to be able to load)
+        if (d->status == Null) {
+            d->status = Loading;
+            emit statusChanged();
+        }
+        // Handle signals where clearImage could make cacheEntryChanged not see any change or wasn't called
+        if (d->status == Loading || d->paintRect.isNull())
+            emit paintedSizeChanged();
+        if (d->status == Loading || !imageSize().isValid())
+            emit imageSizeChanged();
+    }
+
+    emit sourceChanged();
 }
 
 QSize SpeedyImage::imageSize() const
@@ -62,10 +79,13 @@ void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGe
     if (newGeometry.size() == oldGeometry.size())
         return;
 
-    d->calcPaintRect();
+    // XXX Consider this as a polish step?
+    if (d->calcPaintRect()) {
+        emit paintedSizeChanged();
+    }
 
     // XXX Exclude error cases
-    if (!newGeometry.isEmpty() && !d->source.isEmpty() && d->cacheEntry.isEmpty() && d->loadJob.isNull()) {
+    if (!newGeometry.isEmpty() && d->status == Loading && d->cacheEntry.isEmpty() && d->loadJob.isNull()) {
         // Trigger first load of the image once we have geometry
         qCDebug(lcItem) << "triggering load with initial item geometry" << newGeometry.size();
         d->reloadImage();
@@ -157,8 +177,8 @@ void SpeedyImagePrivate::reloadImage()
         cacheEntry = imageCache->get(source);
 
         if (!cacheEntry.isEmpty()) {
-            qCDebug(lcItem) << "image loaded from cache";
-            calcPaintRect();
+            // Call cacheEntryChanged to handle everything
+            cacheEntryChanged(source);
         }
     }
 
@@ -183,7 +203,10 @@ void SpeedyImagePrivate::reloadImage()
         loadJob = imgLoader->enqueue(source, drawSize, 0,
              [src,cache](const ImageLoaderJob &job) {
                 // Cache will signal the update to the cache entry
-                cache->insert(src, job.result(), job.imageSize());
+                if (!job.error().isEmpty())
+                    cache->insert(src, job.error());
+                else
+                    cache->insert(src, job.result(), job.imageSize());
              });
     }
 }
@@ -195,11 +218,23 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
 
     qCDebug(lcItem) << "cache signal for" << key;
     loadJob.reset();
-    calcPaintRect();
     q->update();
 
-    // XXX Unsafe assumption with image load errors, but they need work anyway
-    Q_ASSERT(cacheEntry.texture());
+    auto oldStatus = status;
+    if (!cacheEntry.error().isEmpty()) {
+        status = SpeedyImage::Error;
+    } else {
+        status = SpeedyImage::Ready;
+        Q_ASSERT(cacheEntry.texture());
+    }
+
+    if (calcPaintRect())
+        emit q->paintedSizeChanged();
+    if (status != oldStatus)
+        emit q->statusChanged();
+    // Can't really tell if image size changed, but assume it won't between reloads
+    if (oldStatus != SpeedyImage::Ready)
+        emit q->imageSizeChanged();
 
     // Reload the image again if drawSize has changed and needs a larger scale
     if (needsReloadForDrawSize())
@@ -209,7 +244,7 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     }
 }
 
-void SpeedyImagePrivate::calcPaintRect()
+bool SpeedyImagePrivate::calcPaintRect()
 {
     QRectF box(0, 0, q->width(), q->height());
     QRectF img(QPointF(0, 0), cacheEntry.loadedSize());
@@ -224,8 +259,10 @@ void SpeedyImagePrivate::calcPaintRect()
         paint.translate((box.width() - paint.width()) / 2, (box.height() - paint.height()) / 2);
     }
 
-    if (paint != paintRect) {
-        paintRect = paint;
-        q->update();
-    }
+    if (paint == paintRect)
+        return false;
+
+    paintRect = paint;
+    q->update();
+    return true;
 }

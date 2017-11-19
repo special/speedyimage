@@ -14,6 +14,7 @@ public:
     SpeedyImage *q;
 
     QString source;
+    SpeedyImage::Status status;
 
     ImageTextureCache *imageCache;
     ImageTextureCacheEntry cacheEntry;
@@ -25,7 +26,7 @@ public:
 
     void clearImage();
     void reloadImage();
-    void calcPaintRect();
+    bool calcPaintRect();
     bool needsReloadForDrawSize();
 
 public slots:

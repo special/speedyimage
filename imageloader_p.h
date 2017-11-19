@@ -22,5 +22,5 @@ public:
 
     void startWorkers();
     void worker();
-    QImage readImage(const QString &path, const QSize &drawSize, QSize &imageSize);
+    QImage readImage(const QString &path, const QSize &drawSize, QSize &imageSize, QString &error);
 };

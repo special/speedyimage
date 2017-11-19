@@ -22,6 +22,7 @@ struct ImageLoaderJobData
 
     std::shared_ptr<QImage> result;
     QSize resultSize;
+    QString error;
 };
 
 class ImageLoaderJob
@@ -47,9 +48,10 @@ public:
         if (d) d->drawSize = size;
     }
 
-    bool finished() const { return d ? (bool)d->result : false; }
+    bool finished() const { return d ? (d->result || !d->error.isEmpty()) : false; }
     QImage result() const { return d && d->result ? *d->result : QImage(); }
     QSize imageSize() const { return d ? d->resultSize : QSize(); }
+    QString error() const { return d ? d->error : QString(); }
 
 private:
     std::shared_ptr<ImageLoaderJobData> d;

@@ -8,6 +8,7 @@ class SpeedyImage : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QString source READ source WRITE setSource NOTIFY sourceChanged)
+    Q_PROPERTY(Status status READ status NOTIFY statusChanged)
     Q_PROPERTY(QSize imageSize READ imageSize NOTIFY imageSizeChanged)
     Q_PROPERTY(QSizeF paintedSize READ paintedSize NOTIFY paintedSizeChanged)
 
@@ -26,11 +27,14 @@ public:
     QString source() const;
     void setSource(const QString &source);
 
+    Status status() const;
+
     QSize imageSize() const;
     QSizeF paintedSize() const;
 
 signals:
     void sourceChanged();
+    void statusChanged();
     void imageSizeChanged();
     void paintedSizeChanged();
 

@@ -50,6 +50,7 @@ public:
     ImageTextureCachePrivate * const cache;
 
     QImage image;
+    QString error;
     QSize imageSize;
     QSGTexture *texture;
     int cost;

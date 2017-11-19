@@ -104,7 +104,8 @@ void ImageLoaderPrivate::worker()
         }
 
         QSize imageSize;
-        auto result = std::make_shared<QImage>(readImage(path, drawSize, imageSize));
+        QString error;
+        auto result = std::make_shared<QImage>(readImage(path, drawSize, imageSize, error));
         for (auto &weakJob : jobData) {
             auto job = weakJob.lock();
             if (!job) {
@@ -112,6 +113,7 @@ void ImageLoaderPrivate::worker()
             }
             job->result = result;
             job->resultSize = imageSize;
+            job->error = error;
             if (job->callback) {
                 job->callback(ImageLoaderJob(job));
             }
@@ -119,7 +121,7 @@ void ImageLoaderPrivate::worker()
     }
 }
 
-QImage ImageLoaderPrivate::readImage(const QString &path, const QSize &drawSize, QSize &imageSize)
+QImage ImageLoaderPrivate::readImage(const QString &path, const QSize &drawSize, QSize &imageSize, QString &error)
 {
     imageSize = QSize();
 
@@ -127,36 +129,40 @@ QImage ImageLoaderPrivate::readImage(const QString &path, const QSize &drawSize,
     rd.setAutoTransform(true);
 
     QByteArray format = rd.format();
-    if (format == "jpeg") {
-        imageSize = rd.size();
-        if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
-            // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
-            qreal factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
+    imageSize = rd.size();
+    if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
+        // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
+        qreal factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
 
-            if (factor >= 16) {
-                factor = 16;
-            } else if (factor >= 8) {
-                factor = 8;
-            } else if (factor >= 4) {
-                factor = 4;
-            } else if (factor >= 2) {
-                factor = 2;
-            } else {
-                factor = 1;
-            }
+        if (factor >= 16) {
+            factor = 16;
+        } else if (factor >= 8) {
+            factor = 8;
+        } else if (factor >= 4) {
+            factor = 4;
+        } else if (factor >= 2) {
+            factor = 2;
+        } else {
+            factor = 1;
+        }
 
-            if (factor > 1) {
-                qCDebug(lcImageLoad) << "Using JPEG scaling for" << imageSize << "->" << drawSize << "at factor" << factor;
-                rd.setScaledSize(imageSize / factor);
-            }
+        // This is only really more efficient to load for JPEG, but smaller textures are a good thing long term
+        if (factor > 1) {
+            qCDebug(lcImageLoad) << "Using sw scaling for" << imageSize << "->" << drawSize << "at factor" << factor;
+            rd.setScaledSize(imageSize / factor);
         }
     }
 
     QImage image = rd.read();
-    if (!imageSize.isValid()) {
+    if (!imageSize.isValid())
         imageSize = image.size();
+
+    if (image.isNull()) {
+        error = rd.errorString();
+        qCDebug(lcImageLoad) << "error loading" << path << error;
+    } else {
+        qCDebug(lcImageLoad) << "loaded" << path << imageSize << "at" << image.size() << "with draw size" << drawSize;
     }
 
-    qCDebug(lcImageLoad) << "loaded" << path << imageSize << "at" << image.size() << "with draw size" << drawSize;
     return image;
 }
