@@ -64,6 +64,11 @@ void SpeedyImage::setSource(const QString &source)
     emit sourceChanged();
 }
 
+SpeedyImage::Status SpeedyImage::status() const
+{
+    return d->status;
+}
+
 QSize SpeedyImage::imageSize() const
 {
     return d->cacheEntry.imageSize();
