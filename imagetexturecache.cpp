@@ -25,7 +25,13 @@ ImageTextureCache::ImageTextureCache(QQuickWindow *window)
 
 ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
     : window(window)
+    , freeThrottle(0)
+    , softLimit(qgetenv("SPEEDYIMAGE_CACHE_SIZE").toInt())
 {
+    if (softLimit < 1) {
+        softLimit = 512 * 1048576;
+    }
+
     connect(window, &QQuickWindow::beforeSynchronizing, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
 }
 
@@ -44,6 +50,7 @@ ImageTextureCacheEntry ImageTextureCache::get(const QString &key)
     if (!data) {
         data = std::make_shared<ImageTextureCacheData>(d.get(), key);
         d->cache.insert(key, data);
+        data->updateCost();
     }
     return ImageTextureCacheEntry(data);
 }
@@ -55,10 +62,10 @@ void ImageTextureCache::insert(const QString &key, const QImage &image, const QS
     entry.d->imageSize = imageSize;
     // XXX smarter texture management
     // XXX Atlas won't be used because this isn't done from render thread
-    // XXX needs lifetime management; supposed to free from the render thread
-    // XXX Use the window's post-render signal to schedule a call to check free list from render thread?
     entry.d->texture = d->window->createTextureFromImage(image, {QQuickWindow::TextureCanUseAtlas, QQuickWindow::TextureIsOpaque});
     Q_ASSERT(entry.d->texture);
+    entry.d->updateCost();
+
     emit changed(key);
 }
 
@@ -74,30 +81,55 @@ void ImageTextureCachePrivate::setFreeable(const std::shared_ptr<ImageTextureCac
 
 void ImageTextureCachePrivate::renderThreadFree()
 {
-    // XXX Cache size bounding and such
+    // Only check cache every 100 frames
+    // XXX Would a timer with affinity to the render thread do this without being as reliant on render timing?
+    if (++freeThrottle < 100)
+        return;
+    freeThrottle = 0;
 
-    // XXX Is this a deadlock? pretty sure there's order inversion w/ creation (cache->free instead of free->cache)
-    // Is avoidance sufficient?
+    qCDebug(lcCache) << "cache using" << cacheCost << "of" << softLimit;
+    if (cacheCost <= softLimit)
+        return;
+
+    // Copy freeable and clear so we can release the mutex while working on cache, to avoid deadlocks
     QMutexLocker freeLock(&freeMutex);
     if (freeable.isEmpty())
         return;
+    auto freeList = freeable;
+    freeable.clear();
+    freeLock.unlock();
 
     // There is no path for a data to go from 0 to 1 ref without holding the cache mutex,
     // so holding it guarantees that data with 0 ref can be freed safely.
     QMutexLocker cacheLock(&mutex);
-    for (const auto &data : freeable) {
-        Q_ASSERT(data->getRefCount() == 0);
-        Q_ASSERT(data->cache == this);
-        qCDebug(lcCache) << "cache freeing" << data->key;
+    while (!freeList.isEmpty()) {
+        auto data = freeList.takeFirst();
+        if (data->getRefCount() > 0)
+            continue;
+
+        qCDebug(lcCache) << "cache freeing" << data->cost << "from" << data->key;
 
         delete data->texture;
         data->texture = nullptr;
 
         Q_ASSERT(cache.value(data->key) == data);
         cache.remove(data->key);
+
+        cacheCost -= data->cost;
+        if (cacheCost <= softLimit)
+            break;
     }
+
+    qCDebug(lcCache) << "cache using" << cacheCost << "of" << softLimit << "after free;" << freeList.size() << "items still freeable";
     cacheLock.unlock();
-    freeable.clear();
+
+    // Move anything we didn't free back into freeable
+    if (!freeList.isEmpty()) {
+        freeLock.relock();
+        freeList += freeable;
+        freeable = freeList;
+        freeLock.unlock();
+    }
 }
 
 ImageTextureCacheEntry::ImageTextureCacheEntry()
@@ -163,3 +195,17 @@ QSGTexture *ImageTextureCacheEntry::texture() const
     return d ? d->texture : nullptr;
 }
 
+void ImageTextureCacheData::updateCost()
+{
+    int newCost = 1;
+    if (texture) {
+        QSize sz = texture->textureSize();
+        newCost = qMax(sz.width() * sz.height() * 3, 1);
+    }
+
+    if (cost != newCost) {
+        int delta = newCost - cost;
+        cost = newCost;
+        cache->cacheCost += delta;
+    }
+}

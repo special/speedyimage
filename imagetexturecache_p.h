@@ -15,8 +15,13 @@ public:
 
     QMutex mutex;
     QHash<QString,std::shared_ptr<ImageTextureCacheData>> cache;
+    QAtomicInt cacheCost;
+
     QMutex freeMutex;
     QVector<std::shared_ptr<ImageTextureCacheData>> freeable;
+    int freeThrottle;
+
+    int softLimit;
 
     ImageTextureCachePrivate(QQuickWindow *window);
     ~ImageTextureCachePrivate();
@@ -36,6 +41,7 @@ public:
         : key(key)
         , cache(cache)
         , texture(nullptr)
+        , cost(1)
         , refCount(0)
     {
     }
@@ -46,6 +52,7 @@ public:
     QImage image;
     QSize imageSize;
     QSGTexture *texture;
+    int cost;
 
     void ref() {
         if (!refCount.fetchAndAddOrdered(1)) {
@@ -64,6 +71,8 @@ public:
     {
         return refCount.load();
     }
+
+    void updateCost();
 
 private:
     // Number of Entry objects referencing this data
