@@ -146,6 +146,10 @@ void SpeedyImagePrivate::clearImage()
 
 bool SpeedyImagePrivate::needsReloadForDrawSize()
 {
+    if (status == Error || status == Null) {
+        return false;
+    }
+
     if (paintRect.isEmpty()) {
         // There is no paint rect when we don't know image dimensions; in this case, it's always
         // appropriate to try to reload for draw size.
@@ -187,7 +191,7 @@ void SpeedyImagePrivate::reloadImage()
         }
     }
 
-    if (!cacheEntry.isEmpty() && !needsReloadForDrawSize()) {
+    if ((!cacheEntry.isEmpty() && !needsReloadForDrawSize()) || !cacheEntry.error().isEmpty()) {
         // Use cache entry
         return;
     }
