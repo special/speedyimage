@@ -107,6 +107,7 @@ void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGe
 QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
     if (!d->cacheEntry.texture()) {
+        delete oldNode;
         return nullptr;
     }
 
@@ -146,7 +147,7 @@ void SpeedyImagePrivate::clearImage()
 
 bool SpeedyImagePrivate::needsReloadForDrawSize()
 {
-    if (status == Error || status == Null) {
+    if (status == SpeedyImage::Error || status == SpeedyImage::Null) {
         return false;
     }
 
