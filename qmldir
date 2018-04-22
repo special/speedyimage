@@ -1,0 +1,2 @@
+module SpeedyImage
+plugin declarative_qmlspeedyimageplugin
