@@ -59,6 +59,8 @@ void SpeedyImage::setSource(const QString &source)
             emit paintedSizeChanged();
         if (d->status == Loading || !imageSize().isValid())
             emit imageSizeChanged();
+    } else {
+        emit statusChanged();
     }
 
     emit sourceChanged();
