@@ -86,26 +86,61 @@ void ImageLoaderPrivate::worker()
         queue.pop_front();
         l.unlock();
 
+        QImageReader rd;
+        rd.setAutoTransform(true);
+        QSize drawSize, imageSize;
+
         // jobData is a vector of weak pointers to ImageLoaderJobData representing the same file
-        QString path;
-        QSize drawSize;
         for (auto &weakJob : jobData) {
             auto job = weakJob.lock();
             if (!job) {
+                // aborted
                 continue;
             }
-            path = job->path;
-            drawSize = QSize(qMax(drawSize.width(), job->drawSize.width()), qMax(drawSize.height(), job->drawSize.height()));
+
+            if (rd.fileName().isEmpty()) {
+                rd.setFileName(job->path);
+            }
+
+            // If only one dimension of drawSize is set, read image size to calculate the other by aspect
+            QSize jobDrawSize = job->drawSize;
+            if (jobDrawSize.isEmpty() && (jobDrawSize.width() > 0 || jobDrawSize.height() > 0)) {
+                if (!imageSize.isValid()) {
+                    imageSize = rd.size();
+                }
+                if (imageSize.isEmpty()) {
+                    // Indicates that the plugin can't read size ahead of decoding, which should only
+                    // be third party plugins. In this case we can't be smart about scaling anyway, so
+                    // just make drawSize infinite.
+                    jobDrawSize = QSize(0, 0);
+                } else if (jobDrawSize.width() > 0) {
+                    // Calculate height by width
+                    double f = double(jobDrawSize.width()) / double(imageSize.width());
+                    jobDrawSize = QSize(jobDrawSize.width(), qRound(imageSize.height() * f));
+                } else {
+                    // Width by height
+                    double f = double(jobDrawSize.height()) / double(imageSize.height());
+                    jobDrawSize = QSize(qRound(imageSize.width() * f), jobDrawSize.height());
+                }
+            }
+
+            // Now max the potentially-modified jobDrawSize with drawSize
+            if (jobDrawSize.isEmpty()) {
+                // Full size
+                drawSize = QSize(0, 0); // Valid, but empty; unset is invalid
+            } else if (!drawSize.isValid() || !drawSize.isEmpty()) {
+                // All other cases, except when drawSize is already set to empty for full size
+                drawSize = QSize(qMax(drawSize.width(), jobDrawSize.width()), qMax(drawSize.height(), jobDrawSize.height()));
+            }
         }
 
-        if (path.isEmpty()) {
+        if (rd.fileName().isEmpty()) {
             // Job aborted
             continue;
         }
 
-        QSize imageSize;
         QString error;
-        auto result = std::make_shared<QImage>(readImage(path, drawSize, imageSize, error));
+        auto result = std::make_shared<QImage>(readImage(rd, drawSize, imageSize, error));
         for (auto &weakJob : jobData) {
             auto job = weakJob.lock();
             if (!job) {
@@ -121,14 +156,8 @@ void ImageLoaderPrivate::worker()
     }
 }
 
-QImage ImageLoaderPrivate::readImage(const QString &path, const QSize &drawSize, QSize &imageSize, QString &error)
+QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QSize &imageSize, QString &error)
 {
-    imageSize = QSize();
-
-    QImageReader rd(path);
-    rd.setAutoTransform(true);
-
-    QByteArray format = rd.format();
     imageSize = rd.size();
     if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
         // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
@@ -159,9 +188,9 @@ QImage ImageLoaderPrivate::readImage(const QString &path, const QSize &drawSize,
 
     if (image.isNull()) {
         error = rd.errorString();
-        qCDebug(lcImageLoad) << "error loading" << path << error;
+        qCDebug(lcImageLoad) << "error loading" << rd.fileName() << error;
     } else {
-        qCDebug(lcImageLoad) << "loaded" << path << imageSize << "at" << image.size() << "with draw size" << drawSize;
+        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "with draw size" << drawSize;
     }
 
     return image;

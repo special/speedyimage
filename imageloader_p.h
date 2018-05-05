@@ -4,6 +4,7 @@
 #include <deque>
 #include <thread>
 #include <QMutex>
+#include <QImageReader>
 
 class ImageLoaderPrivate
 {
@@ -22,5 +23,5 @@ public:
 
     void startWorkers();
     void worker();
-    QImage readImage(const QString &path, const QSize &drawSize, QSize &imageSize, QString &error);
+    QImage readImage(QImageReader &rd, const QSize &drawSize, QSize &imageSize, QString &error);
 };
