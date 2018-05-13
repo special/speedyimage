@@ -22,6 +22,7 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     : q(q)
     , status(SpeedyImage::Null)
     , imageCache(nullptr)
+    , explicitLoadingSize(false)
 {
     connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
 }
@@ -61,9 +62,23 @@ void SpeedyImage::setSource(const QString &source)
             emit imageSizeChanged();
     } else {
         emit statusChanged();
+        emit paintedSizeChanged();
+        emit imageSizeChanged();
     }
 
     emit sourceChanged();
+}
+
+QSize SpeedyImage::loadingSize() const
+{
+    return d->loadingSize;
+}
+
+void SpeedyImage::setLoadingSize(QSize size) {
+    d->explicitLoadingSize = size.isValid();
+    if (!size.isValid())
+        size = QSize(width(), height());
+    d->applyLoadingSize(size);
 }
 
 SpeedyImage::Status SpeedyImage::status() const
@@ -91,18 +106,8 @@ void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGe
         emit paintedSizeChanged();
     }
 
-    // XXX Exclude error cases
-    if (!newGeometry.isEmpty() && d->status == Loading && d->cacheEntry.isEmpty() && d->loadJob.isNull()) {
-        // Trigger first load of the image once we have geometry
-        qCDebug(lcItem) << "triggering load with initial item geometry" << newGeometry.size();
-        d->reloadImage();
-    } else if (!d->loadJob.isNull()) {
-        // If there is already a load job, unconditionally try to update draw size
-        // This is free, and setImage will reload if the draw size did not change in time.
-        d->reloadImage();
-    } else if (d->needsReloadForDrawSize()) {
-        // Reload the image again if drawSize has changed and needs a larger scale
-        d->reloadImage();
+    if (!d->explicitLoadingSize) {
+        d->applyLoadingSize(newGeometry.size().toSize());
     }
 }
 
@@ -147,32 +152,74 @@ void SpeedyImagePrivate::clearImage()
     q->update();
 }
 
+void SpeedyImagePrivate::applyLoadingSize(const QSize &size)
+{
+    if (loadingSize == size)
+        return;
+
+    loadingSize = size;
+    emit q->loadingSizeChanged();
+
+    // XXX Exclude error cases
+    if (size.isValid() && status == SpeedyImage::Loading && cacheEntry.isEmpty() && loadJob.isNull()) {
+        // Trigger first load of the image once we have geometry
+        qCDebug(lcItem) << "triggering load with initial loading size" << size;
+        reloadImage();
+    } else if (!loadJob.isNull()) {
+        // If there is already a load job, unconditionally try to update draw size
+        // This is free, and setImage will reload if the draw size did not change in time.
+        reloadImage();
+    } else if (needsReloadForDrawSize()) {
+        // Reload the image again if drawSize has changed and needs a larger scale
+        reloadImage();
+    }
+}
+
+// Returns true if the the image needs to be reloaded based on the current
+// loadingSize.
 bool SpeedyImagePrivate::needsReloadForDrawSize()
 {
     if (status == SpeedyImage::Error || status == SpeedyImage::Null) {
         return false;
+    } else if (!loadingSize.isValid()) {
+        // If loadingSize is invalid, do nothing. Does not include empty loadingSize.
+        return false;
     }
 
-    if (paintRect.isEmpty()) {
-        // There is no paint rect when we don't know image dimensions; in this case, it's always
-        // appropriate to try to reload for draw size.
+    QSizeF loadedSize = cacheEntry.loadedSize();
+    QSizeF imageSize = cacheEntry.imageSize();
+    if (imageSize.isEmpty() || loadedSize.isEmpty()) {
+        // If nothing is loaded yet, always reload for draw size; see reloadImage.
         return true;
     }
 
-    QSize loadedSize = cacheEntry.loadedSize();
-    QSize imageSize = cacheEntry.imageSize();
-    if (loadedSize.isEmpty()) {
-        return true;
+    // Scale imageSize within loadingSize and reload if either dimension exceeds loadedSize
+    QSizeF fitSize;
+    if (!loadingSize.isEmpty()) {
+        if (imageSize.width() / imageSize.height() > loadingSize.width() / loadingSize.height()) {
+            fitSize = QSizeF(loadingSize.width(), imageSize.height() * (loadingSize.width() / loadingSize.width()));
+        } else {
+            fitSize = QSizeF(imageSize.width() * (loadingSize.height() / imageSize.height()), loadingSize.height());
+        }
+    } else if (loadingSize.width() == 0 && loadingSize.height() == 0) {
+        // If loadingSize is exactly zero (for full size), reload only if the full size image
+        // isn't loaded yet
+        return imageSize != loadedSize;
+    } else if (loadingSize.width() > 0) {
+        // Calculate height by width
+        double f = double(loadingSize.width()) / double(imageSize.width());
+        fitSize = QSizeF(loadingSize.width(), qRound(imageSize.height() * f));
+    } else {
+        // Calculate width by height
+        double f = double(loadingSize.height()) / double(imageSize.height());
+        fitSize = QSizeF(qRound(imageSize.width() * f), loadingSize.height());
     }
 
-    // Reload is necessary if the paint area is larger than the loaded image in either dimension,
-    // and the full-scale image is larger than the loaded image in that same dimension.
-    if ((paintRect.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
-        (paintRect.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
+    if ((fitSize.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
+        (fitSize.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
     {
         return true;
     }
-
     return false;
 }
 
@@ -205,14 +252,14 @@ void SpeedyImagePrivate::reloadImage()
         // check in setImage that will fire off a new job at a larger drawSize
         // if the result is insufficient, and we'll still have an upscale to display
         // meanwhile.
-        if (drawSize != loadJob.drawSize()) {
-            qCDebug(lcItem) << "attempting to update draw size on load job to" << drawSize;
-            loadJob.setDrawSize(drawSize);
+        if (loadingSize != loadJob.drawSize()) {
+            qCDebug(lcItem) << "attempting to update draw size on load job to" << loadingSize;
+            loadJob.setDrawSize(loadingSize);
         }
     } else {
         auto src = source; // Copy for lambda
         auto cache = imageCache;
-        loadJob = imgLoader->enqueue(source, drawSize, 0,
+        loadJob = imgLoader->enqueue(source, loadingSize, 0,
              [src,cache](const ImageLoaderJob &job) {
                 // Cache will signal the update to the cache entry
                 if (!job.error().isEmpty())
@@ -262,13 +309,26 @@ bool SpeedyImagePrivate::calcPaintRect()
     QRectF img(QPointF(0, 0), cacheEntry.loadedSize());
     QRectF paint;
 
-    if (!img.isEmpty() && !box.isEmpty()) {
+    // XXX This code is duplicated a couple times now...
+    if (img.isEmpty()) {
+        // Empty paintRect
+    } else if (!box.isEmpty()) {
         if (img.width() / img.height() > box.width() / box.height()) {
             paint = QRectF(0, 0, box.width(), img.height() * (box.width() / img.width()));
         } else {
             paint = QRectF(0, 0, img.width() * (box.height() / img.height()), box.height());
         }
         paint.translate((box.width() - paint.width()) / 2, (box.height() - paint.height()) / 2);
+    } else if (box.width() > 0) {
+        // Calculate height by width
+        double f = double(img.width()) / double(img.width());
+        paint = QRectF(0, 0, box.width(), qRound(img.height() * f));
+        paint.translate(0, (box.height() - paint.height()) / 2);
+    } else {
+        // Calculate width by height
+        double f = double(box.height()) / double(img.height());
+        paint = QRectF(0, 0, qRound(img.width() * f), box.height());
+        paint.translate((box.width() - paint.width()) / 2, 0);
     }
 
     if (paint == paintRect)

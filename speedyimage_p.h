@@ -20,6 +20,8 @@ public:
     ImageTextureCacheEntry cacheEntry;
     ImageLoaderJob loadJob;
 
+    bool explicitLoadingSize;
+    QSize loadingSize;
     QRectF paintRect;
 
     SpeedyImagePrivate(SpeedyImage *q);
@@ -27,6 +29,7 @@ public:
     void clearImage();
     void reloadImage();
     bool calcPaintRect();
+    void applyLoadingSize(const QSize &size);
     bool needsReloadForDrawSize();
 
 public slots:
