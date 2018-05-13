@@ -21,6 +21,7 @@ SpeedyImage::SpeedyImage(QQuickItem *parent)
 SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     : q(q)
     , status(SpeedyImage::Null)
+    , componentComplete(false)
     , imageCache(nullptr)
     , explicitLoadingSize(false)
 {
@@ -144,6 +145,13 @@ void SpeedyImagePrivate::setWindow(QQuickWindow *window)
     reloadImage();
 }
 
+void SpeedyImage::componentComplete()
+{
+    QQuickItem::componentComplete();
+    d->componentComplete = true;
+    d->reloadImage();
+}
+
 void SpeedyImagePrivate::clearImage()
 {
     cacheEntry.reset();
@@ -225,10 +233,10 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
 
 void SpeedyImagePrivate::reloadImage()
 {
-    // Wait until the item has dimensions before starting to load
-    QSize drawSize(q->width(), q->height());
-    if (!imageCache || !q->window()->isSceneGraphInitialized() || source.isEmpty() || drawSize.isEmpty()) {
-        qCDebug(lcItem) << "not ready to load yet;" << (bool)imageCache << source << drawSize;
+    if (!componentComplete || !imageCache || !q->window()->isSceneGraphInitialized()
+        || source.isEmpty() || !loadingSize.isValid())
+    {
+        qCDebug(lcItem) << "not ready to load yet;" << (bool)imageCache << source << loadingSize;
         return;
     }
 

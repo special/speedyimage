@@ -15,6 +15,7 @@ public:
 
     QString source;
     SpeedyImage::Status status;
+    bool componentComplete;
 
     ImageTextureCache *imageCache;
     ImageTextureCacheEntry cacheEntry;

@@ -47,6 +47,7 @@ signals:
 protected:
     virtual QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData);
     virtual void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry);
+    virtual void componentComplete();
 
 private:
     std::shared_ptr<SpeedyImagePrivate> d;
