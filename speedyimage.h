@@ -29,6 +29,9 @@ public:
     QString source() const;
     void setSource(const QString &source);
 
+    // XXX Change zero dimensions of loadingSize to the actual size, as soon as imageSize is
+    // available. Because it's constant, this isn't problematic, and then there is something
+    // safe to bind to.
     QSize loadingSize() const;
     void setLoadingSize(QSize size);
 

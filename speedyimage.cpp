@@ -18,16 +18,6 @@ SpeedyImage::SpeedyImage(QQuickItem *parent)
     }
 }
 
-SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
-    : q(q)
-    , status(SpeedyImage::Null)
-    , componentComplete(false)
-    , imageCache(nullptr)
-    , explicitLoadingSize(false)
-{
-    connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
-}
-
 SpeedyImage::~SpeedyImage()
 {
 }
@@ -42,21 +32,22 @@ void SpeedyImage::setSource(const QString &source)
     if (d->source == source)
         return;
 
-    qCDebug(lcItem) << "set source:" << source;
+    d->clearImage();
     d->source = source;
 
-    d->clearImage();
-    d->status = Null;
-
     if (!d->source.isEmpty()) {
-        // reloadImage will update status and signal if it has a cache entry immediately
+        // reloadImage will start loading the image (if possible) or immediately set it
+        // from the cache entry. If the image is set immediately, status and other signals
+        // will have been sent via cacheEntryChanged.
         d->reloadImage();
-        // Otherwise, we're still loading (or waiting to be able to load)
+        // If status is still null, there was no instant cache entry
         if (d->status == Null) {
             d->status = Loading;
             emit statusChanged();
         }
-        // Handle signals where clearImage could make cacheEntryChanged not see any change or wasn't called
+
+        // These signals are necessary if we're still loading (because of clearImage), or
+        // if the cacheEntry was loaded and the value still matches what clearImage set.
         if (d->status == Loading || d->paintRect.isNull())
             emit paintedSizeChanged();
         if (d->status == Loading || !imageSize().isValid())
@@ -99,17 +90,14 @@ QSizeF SpeedyImage::paintedSize() const
 
 void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
-    if (newGeometry.size() == oldGeometry.size())
+    QSize size = newGeometry.size().toSize();
+    if (size == oldGeometry.size().toSize())
         return;
 
-    // XXX Consider this as a polish step?
-    if (d->calcPaintRect()) {
+    if (d->calcPaintRect())
         emit paintedSizeChanged();
-    }
-
-    if (!d->explicitLoadingSize) {
+    if (!d->explicitLoadingSize)
         d->applyLoadingSize(newGeometry.size().toSize());
-    }
 }
 
 QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
@@ -130,6 +118,23 @@ QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     return node;
 }
 
+void SpeedyImage::componentComplete()
+{
+    QQuickItem::componentComplete();
+    d->componentComplete = true;
+    d->reloadImage();
+}
+
+SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
+    : q(q)
+    , status(SpeedyImage::Null)
+    , componentComplete(false)
+    , imageCache(nullptr)
+    , explicitLoadingSize(false)
+{
+    connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
+}
+
 void SpeedyImagePrivate::setWindow(QQuickWindow *window)
 {
     if (!window)
@@ -140,16 +145,9 @@ void SpeedyImagePrivate::setWindow(QQuickWindow *window)
     connect(imageCache, &ImageTextureCache::changed, this, &SpeedyImagePrivate::cacheEntryChanged);
     connect(window, &QQuickWindow::sceneGraphInitialized, this, &SpeedyImagePrivate::reloadImage);
 
-    // Trigger reload in case one was blocked by not having imageCache earlier
-    // Should not have any side effects otherwise
+    // Trigger reload in case one was blocked by not having imageCache earlier. Has no effect
+    // if this is not necessary.
     reloadImage();
-}
-
-void SpeedyImage::componentComplete()
-{
-    QQuickItem::componentComplete();
-    d->componentComplete = true;
-    d->reloadImage();
 }
 
 void SpeedyImagePrivate::clearImage()
@@ -157,6 +155,7 @@ void SpeedyImagePrivate::clearImage()
     cacheEntry.reset();
     loadJob.reset();
     paintRect = QRectF();
+    status = SpeedyImage::Null;
     q->update();
 }
 
@@ -168,23 +167,11 @@ void SpeedyImagePrivate::applyLoadingSize(const QSize &size)
     loadingSize = size;
     emit q->loadingSizeChanged();
 
-    // XXX Exclude error cases
-    if (size.isValid() && status == SpeedyImage::Loading && cacheEntry.isEmpty() && loadJob.isNull()) {
-        // Trigger first load of the image once we have geometry
-        qCDebug(lcItem) << "triggering load with initial loading size" << size;
-        reloadImage();
-    } else if (!loadJob.isNull()) {
-        // If there is already a load job, unconditionally try to update draw size
-        // This is free, and setImage will reload if the draw size did not change in time.
-        reloadImage();
-    } else if (needsReloadForDrawSize()) {
-        // Reload the image again if drawSize has changed and needs a larger scale
-        reloadImage();
-    }
+    // Does nothing if a reload is not necessary
+    reloadImage();
 }
 
-// Returns true if the the image needs to be reloaded based on the current
-// loadingSize.
+// Returns true if the the image needs to be reloaded based on the current loadingSize.
 bool SpeedyImagePrivate::needsReloadForDrawSize()
 {
     if (status == SpeedyImage::Error || status == SpeedyImage::Null) {
@@ -236,7 +223,6 @@ void SpeedyImagePrivate::reloadImage()
     if (!componentComplete || !imageCache || !q->window()->isSceneGraphInitialized()
         || source.isEmpty() || !loadingSize.isValid())
     {
-        qCDebug(lcItem) << "not ready to load yet;" << (bool)imageCache << source << loadingSize;
         return;
     }
 
@@ -261,7 +247,7 @@ void SpeedyImagePrivate::reloadImage()
         // if the result is insufficient, and we'll still have an upscale to display
         // meanwhile.
         if (loadingSize != loadJob.drawSize()) {
-            qCDebug(lcItem) << "attempting to update draw size on load job to" << loadingSize;
+            qCDebug(lcItem) << this << "updating load size on existing job to" << loadingSize;
             loadJob.setDrawSize(loadingSize);
         }
     } else {
@@ -283,7 +269,7 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     if (key != source)
         return;
 
-    qCDebug(lcItem) << "cache signal for" << key;
+    qCDebug(lcItem) << this << "cache updated for" << key;
     loadJob.reset();
     q->update();
 
@@ -306,39 +292,53 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     // Reload the image again if drawSize has changed and needs a larger scale
     if (needsReloadForDrawSize())
     {
-        qCDebug(lcItem) << "triggering immediate reload for a larger drawSize";
+        qCDebug(lcItem) << this << "draw size increased while loading, reloading at larger size";
         reloadImage();
     }
 }
 
-bool SpeedyImagePrivate::calcPaintRect()
+// Return a rectangle fitting content within box while preserving
+// aspect ratio. If either dimension of box is zero, scale based
+// on the other dimension.
+QRectF fitContentRect(const QSizeF &box, const QSizeF &content)
 {
-    QRectF box(0, 0, q->width(), q->height());
-    QRectF img(QPointF(0, 0), cacheEntry.loadedSize());
-    QRectF paint;
+    QRectF fit;
 
-    // XXX This code is duplicated a couple times now...
-    if (img.isEmpty()) {
-        // Empty paintRect
-    } else if (!box.isEmpty()) {
-        if (img.width() / img.height() > box.width() / box.height()) {
-            paint = QRectF(0, 0, box.width(), img.height() * (box.width() / img.width()));
-        } else {
-            paint = QRectF(0, 0, img.width() * (box.height() / img.height()), box.height());
-        }
-        paint.translate((box.width() - paint.width()) / 2, (box.height() - paint.height()) / 2);
-    } else if (box.width() > 0) {
-        // Calculate height by width
-        double f = double(img.width()) / double(img.width());
-        paint = QRectF(0, 0, box.width(), qRound(img.height() * f));
-        paint.translate(0, (box.height() - paint.height()) / 2);
-    } else {
-        // Calculate width by height
-        double f = double(box.height()) / double(img.height());
-        paint = QRectF(0, 0, qRound(img.width() * f), box.height());
-        paint.translate((box.width() - paint.width()) / 2, 0);
+    if (content.isEmpty() || (box.width() == 0 && box.height() == 0)) {
+        return fit;
     }
 
+    if (!box.isEmpty()) {
+        double fContent = content.width() / content.height();
+        double fBox = box.width() / box.height();
+        if (fContent > fBox) {
+            fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width()));
+        } else {
+            fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height());
+        }
+        fit.translate((box.width() - fit.width()) / 2, (box.height() - fit.height()) / 2);
+    } else if (box.width() > 0) {
+        // Calculate height by width
+        double f = double(content.width()) / double(content.width());
+        fit = QRectF(0, 0, box.width(), content.height() * f);
+        fit.translate(0, (box.height() - fit.height()) / 2);
+    } else {
+        // Calculate width by height
+        double f = double(box.height()) / double(content.height());
+        fit = QRectF(0, 0, qRound(content.width() * f), box.height());
+        fit.translate((box.width() - fit.width()) / 2, 0);
+    }
+
+    return fit;
+}
+
+bool SpeedyImagePrivate::calcPaintRect()
+{
+    QSizeF box(q->width(), q->height());
+    QSizeF img(cacheEntry.loadedSize());
+    QRectF paint = fitContentRect(box, img);
+
+    // XXX Should paint be rounded? Might lead to bad results if it's not...
     if (paint == paintRect)
         return false;
 
