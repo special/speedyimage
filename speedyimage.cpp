@@ -6,6 +6,41 @@
 Q_LOGGING_CATEGORY(lcItem, "speedyimage.item")
 
 static ImageLoader *imgLoader;
+//
+// Return a rectangle fitting content within box while preserving
+// aspect ratio. If either dimension of box is zero, scale based
+// on the other dimension.
+QRectF fitContentRect(const QSizeF &box, const QSizeF &content)
+{
+    QRectF fit;
+
+    if (content.isEmpty() || (box.width() == 0 && box.height() == 0)) {
+        return fit;
+    }
+
+    if (!box.isEmpty()) {
+        double fContent = content.width() / content.height();
+        double fBox = box.width() / box.height();
+        if (fContent > fBox) {
+            fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width()));
+        } else {
+            fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height());
+        }
+        fit.translate((box.width() - fit.width()) / 2, (box.height() - fit.height()) / 2);
+    } else if (box.width() > 0) {
+        // Calculate height by width
+        double f = double(content.width()) / double(content.width());
+        fit = QRectF(0, 0, box.width(), content.height() * f);
+        fit.translate(0, (box.height() - fit.height()) / 2);
+    } else {
+        // Calculate width by height
+        double f = double(box.height()) / double(content.height());
+        fit = QRectF(0, 0, qRound(content.width() * f), box.height());
+        fit.translate((box.width() - fit.width()) / 2, 0);
+    }
+
+    return fit;
+}
 
 SpeedyImage::SpeedyImage(QQuickItem *parent)
     : QQuickItem(parent)
@@ -90,6 +125,8 @@ QSizeF SpeedyImage::paintedSize() const
 
 void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
+    QQuickItem::geometryChanged(newGeometry, oldGeometry);
+
     QSize size = newGeometry.size().toSize();
     if (size == oldGeometry.size().toSize())
         return;
@@ -159,8 +196,17 @@ void SpeedyImagePrivate::clearImage()
     q->update();
 }
 
-void SpeedyImagePrivate::applyLoadingSize(const QSize &size)
+void SpeedyImagePrivate::applyLoadingSize(QSize size)
 {
+    // If size has a zero dimension, set based on imageSize
+    QSize imageSize = q->imageSize();
+    if (size.isEmpty() && !imageSize.isEmpty()) {
+        if (size.width() == 0 && size.height() == 0)
+            size = imageSize;
+        else
+            size = fitContentRect(size, imageSize).size().toSize();
+    }
+
     if (loadingSize == size)
         return;
 
@@ -188,33 +234,19 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
         return true;
     }
 
-    // Scale imageSize within loadingSize and reload if either dimension exceeds loadedSize
-    QSizeF fitSize;
-    if (!loadingSize.isEmpty()) {
-        if (imageSize.width() / imageSize.height() > loadingSize.width() / loadingSize.height()) {
-            fitSize = QSizeF(loadingSize.width(), imageSize.height() * (loadingSize.width() / loadingSize.width()));
-        } else {
-            fitSize = QSizeF(imageSize.width() * (loadingSize.height() / imageSize.height()), loadingSize.height());
-        }
-    } else if (loadingSize.width() == 0 && loadingSize.height() == 0) {
-        // If loadingSize is exactly zero (for full size), reload only if the full size image
-        // isn't loaded yet
+    if (loadingSize.width() == 0 && loadingSize.height() == 0) {
+        // If loadingSize is exactly zero, reload only if full imageSize isn't loaded yet
         return imageSize != loadedSize;
-    } else if (loadingSize.width() > 0) {
-        // Calculate height by width
-        double f = double(loadingSize.width()) / double(imageSize.width());
-        fitSize = QSizeF(loadingSize.width(), qRound(imageSize.height() * f));
-    } else {
-        // Calculate width by height
-        double f = double(loadingSize.height()) / double(imageSize.height());
-        fitSize = QSizeF(qRound(imageSize.width() * f), loadingSize.height());
     }
 
-    if ((fitSize.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
-        (fitSize.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
+    // Scale imageSize within loadingSize and reload if either dimension exceeds loadedSize
+    QSizeF fit = fitContentRect(loadingSize, imageSize).size();
+    if ((fit.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
+        (fit.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
     {
         return true;
     }
+
     return false;
 }
 
@@ -285,9 +317,14 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
         emit q->paintedSizeChanged();
     if (status != oldStatus)
         emit q->statusChanged();
+
     // Can't really tell if image size changed, but assume it won't between reloads
-    if (oldStatus != SpeedyImage::Ready)
+    if (oldStatus != SpeedyImage::Ready) {
         emit q->imageSizeChanged();
+        // If loadingSize has a zero dimension, update it based on the imageSize
+        if (loadingSize.isEmpty())
+            applyLoadingSize(loadingSize);
+    }
 
     // Reload the image again if drawSize has changed and needs a larger scale
     if (needsReloadForDrawSize())
@@ -295,41 +332,6 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
         qCDebug(lcItem) << this << "draw size increased while loading, reloading at larger size";
         reloadImage();
     }
-}
-
-// Return a rectangle fitting content within box while preserving
-// aspect ratio. If either dimension of box is zero, scale based
-// on the other dimension.
-QRectF fitContentRect(const QSizeF &box, const QSizeF &content)
-{
-    QRectF fit;
-
-    if (content.isEmpty() || (box.width() == 0 && box.height() == 0)) {
-        return fit;
-    }
-
-    if (!box.isEmpty()) {
-        double fContent = content.width() / content.height();
-        double fBox = box.width() / box.height();
-        if (fContent > fBox) {
-            fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width()));
-        } else {
-            fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height());
-        }
-        fit.translate((box.width() - fit.width()) / 2, (box.height() - fit.height()) / 2);
-    } else if (box.width() > 0) {
-        // Calculate height by width
-        double f = double(content.width()) / double(content.width());
-        fit = QRectF(0, 0, box.width(), content.height() * f);
-        fit.translate(0, (box.height() - fit.height()) / 2);
-    } else {
-        // Calculate width by height
-        double f = double(box.height()) / double(content.height());
-        fit = QRectF(0, 0, qRound(content.width() * f), box.height());
-        fit.translate((box.width() - fit.width()) / 2, 0);
-    }
-
-    return fit;
 }
 
 bool SpeedyImagePrivate::calcPaintRect()

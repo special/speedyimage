@@ -30,7 +30,7 @@ public:
     void clearImage();
     void reloadImage();
     bool calcPaintRect();
-    void applyLoadingSize(const QSize &size);
+    void applyLoadingSize(QSize size);
     bool needsReloadForDrawSize();
 
 public slots:
