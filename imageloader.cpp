@@ -159,6 +159,10 @@ void ImageLoaderPrivate::worker()
 QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QSize &imageSize, QString &error)
 {
     imageSize = rd.size();
+    auto transform = rd.transformation();
+    if (transform & QImageIOHandler::TransformationRotate90)
+        imageSize = QSize(imageSize.height(), imageSize.width());
+
     if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
         // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
         qreal factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
@@ -178,7 +182,8 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
         // This is only really more efficient to load for JPEG, but smaller textures are a good thing long term
         if (factor > 1) {
             qCDebug(lcImageLoad) << "Using sw scaling for" << imageSize << "->" << drawSize << "at factor" << factor;
-            rd.setScaledSize(imageSize / factor);
+            // Be careful to not use imageSize, it may have been transformed
+            rd.setScaledSize(rd.size() / factor);
         }
     }
 
