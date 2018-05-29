@@ -174,17 +174,23 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
 
 void SpeedyImagePrivate::setWindow(QQuickWindow *window)
 {
-    if (!window)
-        return;
+    if (imageCache) {
+        disconnect(imageCache, nullptr, this, nullptr);
+        imageCache = nullptr;
+        // Must be cleared because cacheEntry's texture is specific to a window.
+        // If possible, reloadImage below will fill it in from the new imageCache.
+        clearImage();
+    }
 
-    Q_ASSERT(!imageCache);
-    imageCache = ImageTextureCache::forWindow(window);
-    connect(imageCache, &ImageTextureCache::changed, this, &SpeedyImagePrivate::cacheEntryChanged);
-    connect(window, &QQuickWindow::sceneGraphInitialized, this, &SpeedyImagePrivate::reloadImage);
+    if (window) {
+        imageCache = ImageTextureCache::forWindow(window);
+        connect(imageCache, &ImageTextureCache::changed, this, &SpeedyImagePrivate::cacheEntryChanged);
+        connect(window, &QQuickWindow::sceneGraphInitialized, this, &SpeedyImagePrivate::reloadImage);
 
-    // Trigger reload in case one was blocked by not having imageCache earlier. Has no effect
-    // if this is not necessary.
-    reloadImage();
+        // Trigger reload in case one was blocked by not having imageCache earlier. Has no effect
+        // if this is not necessary.
+        reloadImage();
+    }
 }
 
 void SpeedyImagePrivate::clearImage()
@@ -252,7 +258,7 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
 
 void SpeedyImagePrivate::reloadImage()
 {
-    if (!componentComplete || !imageCache || !q->window()->isSceneGraphInitialized()
+    if (!componentComplete || !imageCache || !q->window() || !q->window()->isSceneGraphInitialized()
         || source.isEmpty() || !loadingSize.isValid())
     {
         return;
