@@ -166,7 +166,6 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     : q(q)
     , status(SpeedyImage::Null)
     , componentComplete(false)
-    , imageCache(nullptr)
     , explicitLoadingSize(false)
 {
     connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
@@ -175,8 +174,8 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
 void SpeedyImagePrivate::setWindow(QQuickWindow *window)
 {
     if (imageCache) {
-        disconnect(imageCache, nullptr, this, nullptr);
-        imageCache = nullptr;
+        disconnect(imageCache.get(), nullptr, this, nullptr);
+        imageCache.reset();
         // Must be cleared because cacheEntry's texture is specific to a window.
         // If possible, reloadImage below will fill it in from the new imageCache.
         clearImage();
@@ -184,7 +183,7 @@ void SpeedyImagePrivate::setWindow(QQuickWindow *window)
 
     if (window) {
         imageCache = ImageTextureCache::forWindow(window);
-        connect(imageCache, &ImageTextureCache::changed, this, &SpeedyImagePrivate::cacheEntryChanged);
+        connect(imageCache.get(), &ImageTextureCache::changed, this, &SpeedyImagePrivate::cacheEntryChanged);
         connect(window, &QQuickWindow::sceneGraphInitialized, this, &SpeedyImagePrivate::reloadImage);
 
         // Trigger reload in case one was blocked by not having imageCache earlier. Has no effect
@@ -288,9 +287,11 @@ void SpeedyImagePrivate::reloadImage()
             qCDebug(lcItem) << this << "updating load size on existing job to" << loadingSize;
             loadJob.setDrawSize(loadingSize);
         }
-    } else {
-        auto src = source; // Copy for lambda
-        auto cache = imageCache;
+    } else if (imageCache) {
+        // Copy for lambda
+        auto src = source;
+        std::shared_ptr<ImageTextureCache> cache = imageCache;
+
         loadJob = imgLoader->enqueue(source, loadingSize, 0,
              [src,cache](const ImageLoaderJob &job) {
                 // Cache will signal the update to the cache entry

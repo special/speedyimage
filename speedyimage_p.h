@@ -17,7 +17,7 @@ public:
     SpeedyImage::Status status;
     bool componentComplete;
 
-    ImageTextureCache *imageCache;
+    std::shared_ptr<ImageTextureCache> imageCache;
     ImageTextureCacheEntry cacheEntry;
     ImageLoaderJob loadJob;
 

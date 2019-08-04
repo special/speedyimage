@@ -10,7 +10,7 @@ class ImageTextureCachePrivate : public QObject
     Q_OBJECT
 
 public:
-    static QHash<QQuickWindow*,ImageTextureCache*> instances;
+    static QHash<QQuickWindow*,std::shared_ptr<ImageTextureCache>> instances;
     QQuickWindow *window;
 
     QMutex mutex;

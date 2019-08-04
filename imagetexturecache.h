@@ -24,7 +24,7 @@ public:
     ImageTextureCacheEntry &operator=(const ImageTextureCacheEntry &o);
 
     bool isNull() const { return !d; }
-    bool isEmpty() const { return image().isNull() && !texture(); }
+    bool isEmpty() const { return image().isNull() && !texture() && error().isEmpty(); }
     void reset();
 
     QImage image() const;
@@ -44,7 +44,7 @@ class ImageTextureCache : public QObject
     Q_OBJECT
 
 public:
-    static ImageTextureCache *forWindow(QQuickWindow *window);
+    static std::shared_ptr<ImageTextureCache> forWindow(QQuickWindow *window);
     virtual ~ImageTextureCache();
 
     // Query the cache with the given key, and return a CacheEntry with the
