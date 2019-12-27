@@ -25,6 +25,9 @@ public:
     QSize loadingSize;
     QRectF paintRect;
 
+    Qt::Alignment alignment;
+    SpeedyImage::SizeMode sizeMode;
+
     SpeedyImagePrivate(SpeedyImage *q);
 
     void clearImage();

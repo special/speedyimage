@@ -9,6 +9,8 @@ class SpeedyImage : public QQuickItem
     Q_OBJECT
     Q_PROPERTY(QString source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(QSize loadingSize READ loadingSize WRITE setLoadingSize NOTIFY loadingSizeChanged)
+    Q_PROPERTY(Qt::Alignment alignment READ alignment WRITE setAlignment NOTIFY alignmentChanged)
+    Q_PROPERTY(SizeMode sizeMode READ sizeMode WRITE setSizeMode NOTIFY sizeModeChanged)
 
     Q_PROPERTY(Status status READ status NOTIFY statusChanged)
     Q_PROPERTY(QSize imageSize READ imageSize NOTIFY imageSizeChanged)
@@ -23,6 +25,12 @@ public:
     };
     Q_ENUM(Status)
 
+    enum class SizeMode {
+        Fit,
+        Crop
+    };
+    Q_ENUM(SizeMode)
+
     explicit SpeedyImage(QQuickItem *parent = nullptr);
     virtual ~SpeedyImage();
 
@@ -35,6 +43,12 @@ public:
     QSize loadingSize() const;
     void setLoadingSize(QSize size);
 
+    Qt::Alignment alignment() const;
+    void setAlignment(Qt::Alignment align);
+
+    SizeMode sizeMode() const;
+    void setSizeMode(SizeMode mode);
+
     Status status() const;
 
     QSize imageSize() const;
@@ -43,6 +57,8 @@ public:
 signals:
     void sourceChanged();
     void loadingSizeChanged();
+    void alignmentChanged();
+    void sizeModeChanged();
     void statusChanged();
     void imageSizeChanged();
     void paintedSizeChanged();

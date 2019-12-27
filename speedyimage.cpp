@@ -6,11 +6,12 @@
 Q_LOGGING_CATEGORY(lcItem, "speedyimage.item")
 
 static ImageLoader *imgLoader;
-//
+
 // Return a rectangle fitting content within box while preserving
 // aspect ratio. If either dimension of box is zero, scale based
 // on the other dimension.
-QRectF fitContentRect(const QSizeF &box, const QSizeF &content)
+// XXX ^ not quite
+QRectF fitContentRect(const QSizeF &box, const QSizeF &content, Qt::Alignment align, SpeedyImage::SizeMode mode)
 {
     QRectF fit;
 
@@ -18,26 +19,39 @@ QRectF fitContentRect(const QSizeF &box, const QSizeF &content)
         return fit;
     }
 
+    // XXX limits correctly when y is larger, but not when x is larger
+
     if (!box.isEmpty()) {
         double fContent = content.width() / content.height();
         double fBox = box.width() / box.height();
-        if (fContent > fBox) {
-            fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width()));
+        bool fitLongEdge = (mode == SpeedyImage::SizeMode::Fit);
+        if (fitLongEdge == (fContent > fBox)) {
+            fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width())); // fit to x
+            qCDebug(lcItem) << "fit to box width:" << fContent << fBox << fit;
         } else {
-            fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height());
+            fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height()); // fit to y
+            qCDebug(lcItem) << "fit to box height:" << fContent << fBox << fit;
         }
-        fit.translate((box.width() - fit.width()) / 2, (box.height() - fit.height()) / 2);
-    } else if (box.width() > 0) {
+    } else if (box.width() > 0 || mode == SpeedyImage::SizeMode::Crop) {
         // Calculate height by width
         double f = double(content.width()) / double(content.width());
         fit = QRectF(0, 0, box.width(), content.height() * f);
-        fit.translate(0, (box.height() - fit.height()) / 2);
     } else {
         // Calculate width by height
         double f = double(box.height()) / double(content.height());
         fit = QRectF(0, 0, qRound(content.width() * f), box.height());
-        fit.translate((box.width() - fit.width()) / 2, 0);
     }
+
+    // xxx need top for crop
+    if (align & Qt::AlignHCenter)
+        fit.moveLeft((box.width() - fit.width()) / 2);
+    else if (align & Qt::AlignRight)
+        fit.moveRight(box.width());
+
+    if (align & Qt::AlignVCenter)
+        fit.moveTop((box.height() - fit.height()) / 2);
+    else if (align & Qt::AlignBottom)
+        fit.moveBottom(box.height());
 
     return fit;
 }
@@ -108,6 +122,34 @@ void SpeedyImage::setLoadingSize(QSize size) {
     d->applyLoadingSize(size);
 }
 
+Qt::Alignment SpeedyImage::alignment() const
+{
+    return d->alignment;
+}
+
+void SpeedyImage::setAlignment(Qt::Alignment align)
+{
+    if (d->alignment == align)
+        return;
+    d->alignment = align;
+    d->calcPaintRect();
+    emit alignmentChanged();
+}
+
+SpeedyImage::SizeMode SpeedyImage::sizeMode() const
+{
+    return d->sizeMode;
+}
+
+void SpeedyImage::setSizeMode(SizeMode mode)
+{
+    if (d->sizeMode == mode)
+        return;
+    d->sizeMode = mode;
+    d->calcPaintRect();
+    emit sizeModeChanged();
+}
+
 SpeedyImage::Status SpeedyImage::status() const
 {
     return d->status;
@@ -167,6 +209,8 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     , status(SpeedyImage::Null)
     , componentComplete(false)
     , explicitLoadingSize(false)
+    , alignment(Qt::AlignCenter)
+    , sizeMode(SpeedyImage::SizeMode::Fit)
 {
     connect(q, &QQuickItem::windowChanged, this, &SpeedyImagePrivate::setWindow);
 }
@@ -209,7 +253,7 @@ void SpeedyImagePrivate::applyLoadingSize(QSize size)
         if (size.width() == 0 && size.height() == 0)
             size = imageSize;
         else
-            size = fitContentRect(size, imageSize).size().toSize();
+            size = fitContentRect(size, imageSize, alignment, sizeMode).size().toSize();
     }
 
     if (loadingSize == size)
@@ -245,7 +289,7 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
     }
 
     // Scale imageSize within loadingSize and reload if either dimension exceeds loadedSize
-    QSizeF fit = fitContentRect(loadingSize, imageSize).size();
+    QSizeF fit = fitContentRect(loadingSize, imageSize, alignment, sizeMode).size();
     if ((fit.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
         (fit.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
     {
@@ -345,7 +389,7 @@ bool SpeedyImagePrivate::calcPaintRect()
 {
     QSizeF box(q->width(), q->height());
     QSizeF img(cacheEntry.loadedSize());
-    QRectF paint = fitContentRect(box, img);
+    QRectF paint = fitContentRect(box, img, alignment, sizeMode);
 
     // XXX Should paint be rounded? Might lead to bad results if it's not...
     if (paint == paintRect)
