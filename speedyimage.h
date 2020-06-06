@@ -8,7 +8,7 @@ class SpeedyImage : public QQuickItem
 {
     Q_OBJECT
     Q_PROPERTY(QString source READ source WRITE setSource NOTIFY sourceChanged)
-    Q_PROPERTY(QSize loadingSize READ loadingSize WRITE setLoadingSize NOTIFY loadingSizeChanged)
+    Q_PROPERTY(QSize targetSize READ targetSize WRITE setTargetSize NOTIFY targetSizeChanged)
     Q_PROPERTY(Qt::Alignment alignment READ alignment WRITE setAlignment NOTIFY alignmentChanged)
     Q_PROPERTY(SizeMode sizeMode READ sizeMode WRITE setSizeMode NOTIFY sizeModeChanged)
 
@@ -37,11 +37,8 @@ public:
     QString source() const;
     void setSource(const QString &source);
 
-    // XXX Change zero dimensions of loadingSize to the actual size, as soon as imageSize is
-    // available. Because it's constant, this isn't problematic, and then there is something
-    // safe to bind to.
-    QSize loadingSize() const;
-    void setLoadingSize(QSize size);
+    QSize targetSize() const;
+    void setTargetSize(QSize size);
 
     Qt::Alignment alignment() const;
     void setAlignment(Qt::Alignment align);
@@ -56,7 +53,7 @@ public:
 
 signals:
     void sourceChanged();
-    void loadingSizeChanged();
+    void targetSizeChanged();
     void alignmentChanged();
     void sizeModeChanged();
     void statusChanged();

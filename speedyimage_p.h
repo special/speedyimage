@@ -21,8 +21,8 @@ public:
     ImageTextureCacheEntry cacheEntry;
     ImageLoaderJob loadJob;
 
-    bool explicitLoadingSize;
-    QSize loadingSize;
+    QSize targetSize;
+    QSize explicitTargetSize;
     QRectF paintRect;
 
     Qt::Alignment alignment;
@@ -33,8 +33,10 @@ public:
     void clearImage();
     void reloadImage();
     bool calcPaintRect();
-    void applyLoadingSize(QSize size);
+    bool updateTargetSize();
     bool needsReloadForDrawSize();
+
+    QSize targetLoadSize() const;
 
 public slots:
     void setWindow(QQuickWindow *window);

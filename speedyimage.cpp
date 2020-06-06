@@ -27,10 +27,8 @@ QRectF fitContentRect(const QSizeF &box, const QSizeF &content, Qt::Alignment al
         bool fitLongEdge = (mode == SpeedyImage::SizeMode::Fit);
         if (fitLongEdge == (fContent > fBox)) {
             fit = QRectF(0, 0, box.width(), content.height() * (box.width() / content.width())); // fit to x
-            qCDebug(lcItem) << "fit to box width:" << fContent << fBox << fit;
         } else {
             fit = QRectF(0, 0, content.width() * (box.height() / content.height()), box.height()); // fit to y
-            qCDebug(lcItem) << "fit to box height:" << fContent << fBox << fit;
         }
     } else if (box.width() > 0 || mode == SpeedyImage::SizeMode::Crop) {
         // Calculate height by width
@@ -85,6 +83,7 @@ void SpeedyImage::setSource(const QString &source)
     d->source = source;
 
     if (!d->source.isEmpty()) {
+        d->updateTargetSize();
         // reloadImage will start loading the image (if possible) or immediately set it
         // from the cache entry. If the image is set immediately, status and other signals
         // will have been sent via cacheEntryChanged.
@@ -110,16 +109,22 @@ void SpeedyImage::setSource(const QString &source)
     emit sourceChanged();
 }
 
-QSize SpeedyImage::loadingSize() const
+// targetSize is the size that the image is scaled to fit within. If targetSize is not set or is set
+// with both dimensions <= 0, the targetSize is implicitly the item's size. If a targetSize is set
+// with either dimension <= 0, the target is scaled based on imageSize to fit the other dimension.
+//
+// In all cases targetSize returns an effective size, which may not be the same as in setTargetSize.
+//
+// TODO: Add a bool property to disable scaled loading entirely
+QSize SpeedyImage::targetSize() const
 {
-    return d->loadingSize;
+    return d->targetSize;
 }
 
-void SpeedyImage::setLoadingSize(QSize size) {
-    d->explicitLoadingSize = size.isValid();
-    if (!size.isValid())
-        size = QSize(width(), height());
-    d->applyLoadingSize(size);
+void SpeedyImage::setTargetSize(QSize size)
+{
+    d->explicitTargetSize = size;
+    d->updateTargetSize();
 }
 
 Qt::Alignment SpeedyImage::alignment() const
@@ -175,8 +180,7 @@ void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGe
 
     if (d->calcPaintRect())
         emit paintedSizeChanged();
-    if (!d->explicitLoadingSize)
-        d->applyLoadingSize(newGeometry.size().toSize());
+    d->updateTargetSize();
 }
 
 QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
@@ -209,7 +213,6 @@ SpeedyImagePrivate::SpeedyImagePrivate(SpeedyImage *q)
     : q(q)
     , status(SpeedyImage::Null)
     , componentComplete(false)
-    , explicitLoadingSize(false)
     , alignment(Qt::AlignCenter)
     , sizeMode(SpeedyImage::SizeMode::Fit)
 {
@@ -242,29 +245,35 @@ void SpeedyImagePrivate::clearImage()
     cacheEntry.reset();
     loadJob.reset();
     paintRect = QRectF();
+    targetSize = QSize();
     status = SpeedyImage::Null;
     q->update();
 }
 
-void SpeedyImagePrivate::applyLoadingSize(QSize size)
+bool SpeedyImagePrivate::updateTargetSize()
 {
-    // If size has a zero dimension, set based on imageSize
-    QSize imageSize = q->imageSize();
-    if (size.isEmpty() && !imageSize.isEmpty()) {
-        if (size.width() == 0 && size.height() == 0)
-            size = imageSize;
-        else
-            size = fitContentRect(size, imageSize, alignment, sizeMode).size().toSize();
+    QSize before = targetSize;
+    if (!explicitTargetSize.isEmpty()) {
+        targetSize = explicitTargetSize;
+    } else if (explicitTargetSize.width() <= 0 && explicitTargetSize.height() <= 0) {
+        targetSize = q->size().toSize();
+    } else {
+        targetSize = fitContentRect(explicitTargetSize, q->imageSize(), alignment, sizeMode).size().toSize();
     }
 
-    if (loadingSize == size)
-        return;
+    if (before == targetSize)
+        return false;
 
-    loadingSize = size;
-    emit q->loadingSizeChanged();
-
-    // Does nothing if a reload is not necessary
+    emit q->targetSizeChanged();
     reloadImage();
+    return true;
+}
+
+QSize SpeedyImagePrivate::targetLoadSize() const
+{
+    if (!q->window())
+        return targetSize;
+    return targetSize * q->window()->devicePixelRatio();
 }
 
 // Returns true if the the image needs to be reloaded based on the current loadingSize.
@@ -272,10 +281,12 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
 {
     if (status == SpeedyImage::Error || status == SpeedyImage::Null) {
         return false;
-    } else if (!loadingSize.isValid()) {
-        // If loadingSize is invalid, do nothing. Does not include empty loadingSize.
-        return false;
     }
+
+    // Don't load if targetLoadSize is null; this is an item without dimensions yet
+    QSize targetLoad = targetLoadSize();
+    if (targetLoad.isNull())
+        return false;
 
     QSizeF loadedSize = cacheEntry.loadedSize();
     QSizeF imageSize = cacheEntry.imageSize();
@@ -284,13 +295,8 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
         return true;
     }
 
-    if (loadingSize.width() == 0 && loadingSize.height() == 0) {
-        // If loadingSize is exactly zero, reload only if full imageSize isn't loaded yet
-        return imageSize != loadedSize;
-    }
-
-    // Scale imageSize within loadingSize and reload if either dimension exceeds loadedSize
-    QSizeF fit = fitContentRect(loadingSize, imageSize, alignment, sizeMode).size();
+    // Scale imageSize within targetLoadSize and reload if either dimension exceeds loadedSize
+    QSizeF fit = fitContentRect(targetLoad, imageSize, alignment, sizeMode).size();
     if ((fit.width() > loadedSize.width() && imageSize.width() > loadedSize.width()) ||
         (fit.height() > loadedSize.height() && imageSize.height() > loadedSize.height()))
     {
@@ -303,7 +309,7 @@ bool SpeedyImagePrivate::needsReloadForDrawSize()
 void SpeedyImagePrivate::reloadImage()
 {
     if (!componentComplete || !imageCache || !q->window() || !q->window()->isSceneGraphInitialized()
-        || source.isEmpty() || !loadingSize.isValid())
+        || source.isEmpty() || targetLoadSize().isNull())
     {
         return;
     }
@@ -322,6 +328,8 @@ void SpeedyImagePrivate::reloadImage()
         return;
     }
 
+    QSize loadingSize = targetLoadSize();
+
     if (!loadJob.isNull()) {
         // We can attempt to change the drawSize on an existing job, but there
         // is no guarantee it will take effect. That case can be handled with a
@@ -329,7 +337,7 @@ void SpeedyImagePrivate::reloadImage()
         // if the result is insufficient, and we'll still have an upscale to display
         // meanwhile.
         if (loadingSize != loadJob.drawSize()) {
-            qCDebug(lcItem) << this << "updating load size on existing job to" << loadingSize;
+            qCDebug(lcItem) << this << "updating load size on existing job to" << loadingSize << "for target size" << q->targetSize();
             loadJob.setDrawSize(loadingSize);
         }
     } else if (imageCache) {
@@ -373,9 +381,7 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     // Can't really tell if image size changed, but assume it won't between reloads
     if (oldStatus != SpeedyImage::Ready) {
         emit q->imageSizeChanged();
-        // If loadingSize has a zero dimension, update it based on the imageSize
-        if (loadingSize.isEmpty())
-            applyLoadingSize(loadingSize);
+        updateTargetSize();
     }
 
     // Reload the image again if drawSize has changed and needs a larger scale
@@ -383,6 +389,9 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     {
         qCDebug(lcItem) << this << "draw size increased while loading, reloading at larger size";
         reloadImage();
+    } else {
+        qCDebug(lcItem) << this << "loaded image of" << cacheEntry.imageSize() << "as" << cacheEntry.loadedSize()
+                        << "and want" << targetLoadSize() << "for display target" << q->targetSize();
     }
 }
 
