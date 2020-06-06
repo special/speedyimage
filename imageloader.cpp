@@ -1,5 +1,6 @@
 #include "imageloader_p.h"
 #include <QImageReader>
+#include <QElapsedTimer>
 
 Q_LOGGING_CATEGORY(lcImageLoad, "speedyimage.load")
 
@@ -158,6 +159,9 @@ void ImageLoaderPrivate::worker()
 
 QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QSize &imageSize, QString &error)
 {
+    QElapsedTimer tm;
+    tm.restart();
+
     imageSize = rd.size();
     auto transform = rd.transformation();
     if (transform & QImageIOHandler::TransformationRotate90)
@@ -195,7 +199,7 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
         error = rd.errorString();
         qCDebug(lcImageLoad) << "error loading" << rd.fileName() << error;
     } else {
-        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "with draw size" << drawSize;
+        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "in" << tm.elapsed() << "ms for draw size" << drawSize;
     }
 
     return image;

@@ -4,6 +4,7 @@
 #include <QLoggingCategory>
 #include <QImage>
 #include <QWaitCondition>
+#include <QElapsedTimer>
 #include <memory>
 #include <functional>
 
@@ -23,6 +24,8 @@ struct ImageLoaderJobData
     std::shared_ptr<QImage> result;
     QSize resultSize;
     QString error;
+
+    QElapsedTimer tmCreated;
 };
 
 class ImageLoaderJob
@@ -53,6 +56,8 @@ public:
     QSize imageSize() const { return d ? d->resultSize : QSize(); }
     QString error() const { return d ? d->error : QString(); }
 
+    qint64 elapsed() const { return d ? d->tmCreated.elapsed() : 0; }
+
 private:
     std::shared_ptr<ImageLoaderJobData> d;
 
@@ -68,6 +73,7 @@ private:
         d->drawSize = drawSize;
         d->priority = priority;
         d->callback = callback;
+        d->tmCreated.restart();
     }
 };
 

@@ -352,7 +352,7 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     if (key != source)
         return;
 
-    qCDebug(lcItem) << this << "cache updated for" << key;
+    qCDebug(lcItem) << this << "cache updated for" << key << "job duration" << loadJob.elapsed();
     loadJob.reset();
     q->update();
 
