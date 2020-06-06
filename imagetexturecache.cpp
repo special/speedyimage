@@ -29,8 +29,9 @@ ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
     , softLimit(qgetenv("SPEEDYIMAGE_CACHE_SIZE").toInt())
 {
     if (softLimit < 1) {
-        softLimit = 128 * 1048576;
+        softLimit = 128;
     }
+    softLimit *= 1048576;
 
     connect(window, &QQuickWindow::beforeSynchronizing, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
 }
