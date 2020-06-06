@@ -1,6 +1,6 @@
 #include "speedyimage_p.h"
 #include "imageloader.h"
-#include <QSGSimpleTextureNode>
+#include <QSGImageNode>
 #include <QQuickWindow>
 
 Q_LOGGING_CATEGORY(lcItem, "speedyimage.item")
@@ -186,13 +186,14 @@ QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         return nullptr;
     }
 
-    QSGSimpleTextureNode *node = static_cast<QSGSimpleTextureNode*>(oldNode);
+    QSGImageNode *node = static_cast<QSGImageNode*>(oldNode);
     if (!node) {
-        node = new QSGSimpleTextureNode;
+        node = window()->createImageNode();
         node->setFiltering(QSGTexture::Linear);
+        node->setMipmapFiltering(QSGTexture::Linear);
     }
     node->setTexture(d->cacheEntry.texture());
-    node->setRect(d->paintRect);
+    node->setRect(d->paintRect.toRect());
 
     return node;
 }
