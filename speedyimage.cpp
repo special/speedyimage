@@ -4,6 +4,7 @@
 #include <QQuickWindow>
 
 Q_LOGGING_CATEGORY(lcItem, "speedyimage.item")
+Q_DECLARE_LOGGING_CATEGORY(lcPerf)
 
 static ImageLoader *imgLoader;
 
@@ -361,7 +362,13 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     if (key != source)
         return;
 
-    qCDebug(lcItem) << this << "cache updated for" << key << "job duration" << loadJob.elapsed();
+    if (!loadJob.isNull()) {
+        auto stats = loadJob.stats();
+        qCInfo(lcPerf) << stats.tmCreated.elapsed() << "ms - loaded" << cacheEntry.imageSize() << "image at"
+                       << cacheEntry.loadedSize() << "- waited" << stats.tmCreated.msecsTo(stats.tmStarted) << "ms for"
+                       << "queue position" << stats.queuePosition << "- read in" << stats.tmStarted.msecsTo(stats.tmFinished) << "ms"
+                       << "- callback after" << stats.tmFinished.elapsed() << "ms";
+    }
     loadJob.reset();
     q->update();
 

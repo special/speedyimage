@@ -11,6 +11,11 @@
 class ImageLoaderJob;
 using ImageLoaderCallback = std::function<void(const ImageLoaderJob &)>;
 
+struct ImageLoaderJobStats {
+    QElapsedTimer tmCreated, tmStarted, tmFinished;
+    int queuePosition = -1;
+};
+
 // ImageLoaderJob is a strong reference to a pending or completed job for an ImageLoader.
 // Jobs are reference counted, and will be aborted if no references remain when the job
 // reaches the front of the queue.
@@ -24,8 +29,7 @@ struct ImageLoaderJobData
     std::shared_ptr<QImage> result;
     QSize resultSize;
     QString error;
-
-    QElapsedTimer tmCreated;
+    ImageLoaderJobStats stats;
 };
 
 class ImageLoaderJob
@@ -56,7 +60,7 @@ public:
     QSize imageSize() const { return d ? d->resultSize : QSize(); }
     QString error() const { return d ? d->error : QString(); }
 
-    qint64 elapsed() const { return d ? d->tmCreated.elapsed() : 0; }
+    ImageLoaderJobStats stats() const { return d ? d->stats : ImageLoaderJobStats(); }
 
 private:
     std::shared_ptr<ImageLoaderJobData> d;
@@ -73,7 +77,7 @@ private:
         d->drawSize = drawSize;
         d->priority = priority;
         d->callback = callback;
-        d->tmCreated.restart();
+        d->stats.tmCreated.restart();
     }
 };
 

@@ -1,8 +1,10 @@
 #include "imagetexturecache_p.h"
 #include <QLoggingCategory>
 #include <QSGTexture>
+#include <QElapsedTimer>
 
 Q_LOGGING_CATEGORY(lcCache, "speedyimage.cache")
+Q_LOGGING_CATEGORY(lcPerf, "speedyimage.perf", QtWarningMsg)
 
 QHash<QQuickWindow*,std::shared_ptr<ImageTextureCache>> ImageTextureCachePrivate::instances;
 
@@ -32,6 +34,7 @@ ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
         softLimit = 128;
     }
     softLimit *= 1048576;
+    qCDebug(lcPerf) << "cache soft limit is" << (softLimit/1048576) << "MB";
 
     connect(window, &QQuickWindow::beforeSynchronizing, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
 }
@@ -65,9 +68,14 @@ void ImageTextureCache::insert(const QString &key, const QImage &image, const QS
     // XXX smarter texture management
     // XXX Atlas won't be used because this isn't done from render thread
     // XXX overwrite of texture will leak
+    QElapsedTimer tm;
+    tm.restart();
     entry.d->texture = d->window->createTextureFromImage(image, {QQuickWindow::TextureCanUseAtlas, QQuickWindow::TextureIsOpaque});
     Q_ASSERT(entry.d->texture);
     entry.d->updateCost();
+    qCDebug(lcPerf) << tm.elapsed() << "ms - createTextureFromImage image" << image.size()
+                    << "texture" << entry.d->texture->textureSize()
+                    << "total cached" << entry.d->cache->cacheCost;
 
     emit changed(key);
 }
@@ -107,6 +115,8 @@ void ImageTextureCachePrivate::renderThreadFree()
     if (cacheCost <= softLimit)
         return;
 
+    QElapsedTimer tm;
+    tm.restart();
     // Copy freeable and clear so we can release the mutex while working on cache, to avoid deadlocks
     QMutexLocker freeLock(&freeMutex);
     if (freeable.isEmpty())
@@ -118,12 +128,15 @@ void ImageTextureCachePrivate::renderThreadFree()
     // There is no path for a data to go from 0 to 1 ref without holding the cache mutex,
     // so holding it guarantees that data with 0 ref can be freed safely.
     QMutexLocker cacheLock(&mutex);
+    int freedCount = 0, freedCost = 0;
     while (!freeList.isEmpty()) {
         auto data = freeList.takeFirst();
         if (data->getRefCount() > 0)
             continue;
 
         qCDebug(lcCache) << "cache freeing" << data->cost << "from" << data->key;
+        freedCount++;
+        freedCost += data->cost;
 
         delete data->texture;
         data->texture = nullptr;
@@ -146,6 +159,8 @@ void ImageTextureCachePrivate::renderThreadFree()
         freeable = freeList;
         freeLock.unlock();
     }
+
+    qCDebug(lcPerf) << tm.elapsed() << "ms - renderThreadFree freed" << freedCount << "with cost" << freedCost;
 }
 
 ImageTextureCacheEntry::ImageTextureCacheEntry()

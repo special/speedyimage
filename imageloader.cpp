@@ -3,6 +3,7 @@
 #include <QElapsedTimer>
 
 Q_LOGGING_CATEGORY(lcImageLoad, "speedyimage.load")
+Q_DECLARE_LOGGING_CATEGORY(lcPerf)
 
 ImageLoader::ImageLoader(QObject *parent)
     : QObject(parent)
@@ -30,6 +31,7 @@ ImageLoaderJob ImageLoader::enqueue(const QString &path, const QSize &drawSize, 
 
     // This algorithm is ..very far from ideal
     QMutexLocker l(&d->mutex);
+    int i = 0;
     for (auto &jobList : d->queue) {
         for (auto &job : jobList) {
             auto jobData = job.lock();
@@ -39,17 +41,21 @@ ImageLoaderJob ImageLoader::enqueue(const QString &path, const QSize &drawSize, 
                 break;
             } else {
                 qCDebug(lcImageLoad) << "enqueued with existing job for" << path << "with draw size" << drawSize;
+                newJob.d->stats.queuePosition = i;
                 jobList.append(newJob.d);
                 goto queued;
             }
         }
+        i++;
     }
 
-    // Priority is primitive at the moment
+    // TODO: Priority is primitive at the moment, and it doesn't move existing jobs (above)
     if (priority > 0) {
         d->queue.push_front(ImageLoaderPrivate::JobDataList{newJob.d});
+        newJob.d->stats.queuePosition = 0;
     } else {
         d->queue.push_back(ImageLoaderPrivate::JobDataList{newJob.d});
+        newJob.d->stats.queuePosition = d->queue.size();
     }
     qCDebug(lcImageLoad) << "enqueued new job for" << path << "with draw size" << drawSize;
 
@@ -98,6 +104,7 @@ void ImageLoaderPrivate::worker()
                 // aborted
                 continue;
             }
+            job->stats.tmStarted.restart();
 
             if (rd.fileName().isEmpty()) {
                 rd.setFileName(job->path);
@@ -147,6 +154,7 @@ void ImageLoaderPrivate::worker()
             if (!job) {
                 continue;
             }
+            job->stats.tmFinished.restart();
             job->result = result;
             job->resultSize = imageSize;
             job->error = error;
@@ -167,9 +175,10 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
     if (transform & QImageIOHandler::TransformationRotate90)
         imageSize = QSize(imageSize.height(), imageSize.width());
 
+    qreal factor = 1;
     if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
         // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
-        qreal factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
+        factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
 
         if (factor >= 16) {
             factor = 16;
@@ -199,7 +208,11 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
         error = rd.errorString();
         qCDebug(lcImageLoad) << "error loading" << rd.fileName() << error;
     } else {
-        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "in" << tm.elapsed() << "ms for draw size" << drawSize;
+        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "for draw size" << drawSize;
+        if (factor > 1 && rd.scaledSize() * factor != imageSize) {
+            qCWarning(lcPerf) << tm.elapsed() << "ms - inexact scale for factor" << factor << "of" << imageSize
+                << "at" << rd.scaledSize() << "may have been inefficient";
+        }
     }
 
     return image;
