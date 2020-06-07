@@ -1,6 +1,7 @@
 #include "imageloader_p.h"
 #include <QImageReader>
 #include <QElapsedTimer>
+#include <QtMath>
 
 Q_LOGGING_CATEGORY(lcImageLoad, "speedyimage.load")
 Q_DECLARE_LOGGING_CATEGORY(lcPerf)
@@ -63,6 +64,11 @@ queued:
     if (d->workers.empty()) {
         d->startWorkers();
     }
+
+    if (!(d->queue.size() % d->workers.size())) {
+        qCDebug(lcPerf) << "queue has" << d->queue.size() << "jobs";
+    }
+
     l.unlock();
     d->cv.wakeOne();
 
@@ -175,28 +181,57 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
     if (transform & QImageIOHandler::TransformationRotate90)
         imageSize = QSize(imageSize.height(), imageSize.width());
 
-    qreal factor = 1;
+    double factor = 1;
     if (!drawSize.isEmpty() && (drawSize.width() < imageSize.width() || drawSize.height() < imageSize.height())) {
-        // Downscaling; pick next factor of two size for most efficient decoding. Calculation may not be ideal.
-        factor = qMin(imageSize.width() / drawSize.width(), imageSize.height() / drawSize.height());
+        // libjpeg can improve performance with n/8 scaling during decode. Below mirrors Qt's logic in
+        // calculating that value. However, Qt's API takes a size explicitly and will scale in software
+        // after decode. Because of rounding, it's sometimes impossible to scale during decode without
+        // Qt scaling as well. So the factor is reduced until no rounding is necessary, which
+        // successfully avoids calling QImage::scaled at the cost of loading some images too large.
+        //
+        // Performance impact is less clear. It may be faster to decode at a smaller size and allow Qt
+        // to do a bit of scaling than to decode the larger size that this code will pick. That would
+        // certainly save memory. Benchmarking would be needed, if not fixing this properly.
+        //
+        // A real fix will require changing Qt to perform decoder scaling without Qt's scaling.
+        factor = qMin(double(imageSize.width()) / drawSize.width(),
+                      double(imageSize.height()) / drawSize.height());
+        factor = qBound(1, qCeil(8/factor), 8);
 
-        if (factor >= 16) {
-            factor = 16;
-        } else if (factor >= 8) {
-            factor = 8;
-        } else if (factor >= 4) {
-            factor = 4;
-        } else if (factor >= 2) {
-            factor = 2;
-        } else {
-            factor = 1;
+#if 0
+        //  XXX for huge images this gets really ugly.
+        double idealFactor = factor;
+        QSize scaleSize;
+        for (; factor < 8; factor++) {
+            QSizeF scaleSizeF = QSizeF(imageSize)*(factor/8);
+            scaleSize = QSize(qCeil(scaleSizeF.width()), qCeil(scaleSizeF.height()));
+            if (scaleSize == scaleSizeF)
+                break;
         }
 
-        // This is only really more efficient to load for JPEG, but smaller textures are a good thing long term
-        if (factor > 1) {
-            qCDebug(lcImageLoad) << "Using sw scaling for" << imageSize << "->" << drawSize << "at factor" << factor;
-            // Be careful to not use imageSize, it may have been transformed
-            rd.setScaledSize(rd.size() / factor);
+        if (factor != idealFactor) {
+            qCInfo(lcImageLoad) << "Image of" << imageSize << "would ideally scale by"
+                                << (idealFactor/8) << "but would have to use" << (factor/8)
+                                << "to avoid Qt scaling";
+        }
+
+        // Use the "ideal" number regardless, because it can otherwise load things at ridiculous
+        // sizes
+        factor = idealFactor;
+#else
+        QSizeF scaleSizeF = QSizeF(imageSize)*(factor/8);
+        QSize scaleSize = QSize(qCeil(scaleSizeF.width()), qCeil(scaleSizeF.height()));
+#endif
+
+        if (factor < 8) {
+            qCDebug(lcImageLoad) << "Using decoder scaling from" << imageSize << "->" << scaleSize << "for draw size" << drawSize;
+            if (rd.size() != imageSize) {
+                // scaledSize is applied before transform
+                qCDebug(lcImageLoad) << "Swapping dimensions when scaling on a transformed image";
+                rd.setScaledSize(QSize(scaleSize.height(), scaleSize.width()));
+            } else {
+                rd.setScaledSize(scaleSize);
+            }
         }
     }
 
@@ -209,10 +244,6 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
         qCDebug(lcImageLoad) << "error loading" << rd.fileName() << error;
     } else {
         qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "for draw size" << drawSize;
-        if (factor > 1 && rd.scaledSize() * factor != imageSize) {
-            qCWarning(lcPerf) << tm.elapsed() << "ms - inexact scale for factor" << factor << "of" << imageSize
-                << "at" << rd.scaledSize() << "may have been inefficient";
-        }
     }
 
     return image;
