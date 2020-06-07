@@ -36,7 +36,7 @@ ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
     softLimit *= 1048576;
     qCDebug(lcPerf) << "cache soft limit is" << (softLimit/1048576) << "MB";
 
-    connect(window, &QQuickWindow::beforeSynchronizing, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
+    connect(window, &QQuickWindow::frameSwapped, this, &ImageTextureCachePrivate::renderThreadFree, Qt::DirectConnection);
 }
 
 ImageTextureCache::~ImageTextureCache()
@@ -62,21 +62,13 @@ ImageTextureCacheEntry ImageTextureCache::get(const QString &key)
 void ImageTextureCache::insert(const QString &key, const QImage &image, const QSize &imageSize)
 {
     auto entry = get(key);
-    entry.d->image = image;
+    if (entry.d->image != image) {
+        entry.d->image = image;
+        entry.d->texture.reset();
+    }
     entry.d->imageSize = imageSize;
     entry.d->error = QString();
-    // XXX smarter texture management
-    // XXX Atlas won't be used because this isn't done from render thread
-    // XXX overwrite of texture will leak
-    QElapsedTimer tm;
-    tm.restart();
-    entry.d->texture = d->window->createTextureFromImage(image, {QQuickWindow::TextureCanUseAtlas, QQuickWindow::TextureIsOpaque});
-    Q_ASSERT(entry.d->texture);
     entry.d->updateCost();
-    qCDebug(lcPerf) << tm.elapsed() << "ms - createTextureFromImage image" << image.size()
-                    << "texture" << entry.d->texture->textureSize()
-                    << "total cached" << entry.d->cache->cacheCost;
-
     emit changed(key);
 }
 
@@ -86,10 +78,8 @@ void ImageTextureCache::insert(const QString &key, const QString &error)
     entry.d->image = QImage();
     entry.d->imageSize = QSize();
     entry.d->error = error;
-    // XXX leak if texture exists
-    entry.d->texture = nullptr;
+    entry.d->texture.reset();
     entry.d->updateCost();
-
     emit changed(key);
 }
 
@@ -138,12 +128,8 @@ void ImageTextureCachePrivate::renderThreadFree()
         freedCount++;
         freedCost += data->cost;
 
-        delete data->texture;
-        data->texture = nullptr;
-
         Q_ASSERT(cache.value(data->key) == data);
         cache.remove(data->key);
-
         cacheCost -= data->cost;
         if (cacheCost <= softLimit)
             break;
@@ -206,7 +192,7 @@ void ImageTextureCacheEntry::reset()
     d.reset();
 }
 
-QImage ImageTextureCacheEntry::image() const
+const QImage ImageTextureCacheEntry::image() const
 {
     return d ? d->image : QImage();
 }
@@ -226,18 +212,35 @@ QSize ImageTextureCacheEntry::imageSize() const
     return d ? d->imageSize : QSize();
 }
 
-QSGTexture *ImageTextureCacheEntry::texture() const
+static void deleteSharedTexture(QSGTexture *texture)
 {
-    return d ? d->texture : nullptr;
+    if (!texture)
+        return;
+    // Assuming that the object has affinity to the render thread
+    qCDebug(lcCache) << "deleting texture" << texture;
+    texture->deleteLater();
+}
+
+// Should only be called by the render thread
+SGSharedTexture ImageTextureCacheEntry::texture()
+{
+    if (!d || d->image.isNull())
+        return nullptr;
+    if (!d->texture.isNull())
+        return d->texture;
+
+    QSGTexture *tex = d->cache->window->createTextureFromImage(d->image,
+                                                               {QQuickWindow::TextureIsOpaque});
+    d->texture = SGSharedTexture(tex, &deleteSharedTexture);
+    return d->texture;
 }
 
 void ImageTextureCacheData::updateCost()
 {
-    int newCost = 1;
-    if (texture) {
-        QSize sz = texture->textureSize();
-        newCost = qMax(sz.width() * sz.height() * 3, 1);
-    }
+    // This isn't an accurate accounting of memory usage. It doesn't count memory used by a
+    // QSGTexture (which could have larger dimensions than the image). But it is more or less
+    // correct in a relative sense.
+    int newCost = qMax(image.sizeInBytes(), qsizetype(1));
 
     if (cost != newCost) {
         int delta = newCost - cost;

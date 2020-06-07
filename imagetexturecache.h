@@ -10,6 +10,8 @@ class ImageTextureCacheData;
 class ImageTextureCacheEntry;
 class ImageTextureCachePrivate;
 
+using SGSharedTexture = QSharedPointer<QSGTexture>;
+
 // ImageTextureCacheEntry represents an entry in the image texture cache,
 // holds a reference to that entry to ensure its lifetime.
 class ImageTextureCacheEntry
@@ -24,14 +26,14 @@ public:
     ImageTextureCacheEntry &operator=(const ImageTextureCacheEntry &o);
 
     bool isNull() const { return !d; }
-    bool isEmpty() const { return image().isNull() && !texture() && error().isEmpty(); }
+    bool isEmpty() const { return image().isNull() && error().isEmpty(); }
     void reset();
 
-    QImage image() const;
+    const QImage image() const;
     QString error() const;
     QSize loadedSize() const;
     QSize imageSize() const;
-    QSGTexture *texture() const;
+    SGSharedTexture texture();
 
 private:
     std::shared_ptr<ImageTextureCacheData> d;

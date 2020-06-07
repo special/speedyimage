@@ -186,7 +186,13 @@ void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGe
 
 QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
-    if (!d->cacheEntry.texture()) {
+    if (d->texture && !oldNode) {
+        qCWarning(lcItem) << "updatePaintNode called with a saved texture but no oldNode."
+            << "This probably means that the texture could've been freed earlier.";
+    }
+
+    d->texture = d->cacheEntry.texture();
+    if (!d->texture) {
         delete oldNode;
         return nullptr;
     }
@@ -197,7 +203,7 @@ QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
         node->setFiltering(QSGTexture::Linear);
         node->setMipmapFiltering(QSGTexture::Linear);
     }
-    node->setTexture(d->cacheEntry.texture());
+    node->setTexture(d->texture.data());
     node->setRect(d->paintRect.toRect());
 
     return node;
@@ -377,7 +383,7 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
         status = SpeedyImage::Error;
     } else {
         status = SpeedyImage::Ready;
-        Q_ASSERT(cacheEntry.texture());
+        Q_ASSERT(!cacheEntry.image().isNull());
     }
 
     if (calcPaintRect())

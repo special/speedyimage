@@ -20,6 +20,7 @@ public:
     std::shared_ptr<ImageTextureCache> imageCache;
     ImageTextureCacheEntry cacheEntry;
     ImageLoaderJob loadJob;
+    SGSharedTexture texture;
 
     QSize targetSize;
     QSize explicitTargetSize;

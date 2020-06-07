@@ -34,13 +34,12 @@ public slots:
 
 // Internal representation of data in the cache, referenced by
 // ImageTextureCacheEntry.
-struct ImageTextureCacheData : public std::enable_shared_from_this<ImageTextureCacheData>
+class ImageTextureCacheData : public std::enable_shared_from_this<ImageTextureCacheData>
 {
 public:
     ImageTextureCacheData(ImageTextureCachePrivate *cache, const QString &key)
         : key(key)
         , cache(cache)
-        , texture(nullptr)
         , cost(1)
         , refCount(0)
     {
@@ -52,7 +51,7 @@ public:
     QImage image;
     QString error;
     QSize imageSize;
-    QSGTexture *texture;
+    SGSharedTexture texture;
     int cost;
 
     void ref() {
