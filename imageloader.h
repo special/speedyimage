@@ -40,6 +40,10 @@ class ImageLoaderJob
 public:
     ImageLoaderJob() { }
     ImageLoaderJob(const ImageLoaderJob &o) : d(o.d) { }
+    ImageLoaderJob& operator=(const ImageLoaderJob& o) {
+        d = o.d;
+        return *this;
+    }
     ~ImageLoaderJob() { }
 
     bool isNull() const { return !d; }
