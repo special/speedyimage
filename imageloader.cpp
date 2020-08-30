@@ -2,6 +2,7 @@
 #include <QImageReader>
 #include <QElapsedTimer>
 #include <QtMath>
+#include <qglobal.h>
 
 Q_LOGGING_CATEGORY(lcImageLoad, "speedyimage.load")
 Q_DECLARE_LOGGING_CATEGORY(lcPerf)
@@ -65,10 +66,6 @@ queued:
         d->startWorkers();
     }
 
-    if (!(d->queue.size() % d->workers.size())) {
-        qCDebug(lcPerf) << "queue has" << d->queue.size() << "jobs";
-    }
-
     l.unlock();
     d->cv.wakeOne();
 
@@ -79,7 +76,12 @@ void ImageLoaderPrivate::startWorkers()
 {
     workers.clear();
     workers.emplace_back(&ImageLoaderPrivate::worker, this);
-    for (unsigned int i = 1; i < std::thread::hardware_concurrency() - 1; i++) {
+
+    int count = qEnvironmentVariableIntValue("SPEEDYIMAGE_WORKERS");
+    if (count < 1)
+        count = std::thread::hardware_concurrency();
+
+    for (int i = 0; i < count; i++) {
         workers.emplace_back(&ImageLoaderPrivate::worker, this);
     }
     qCDebug(lcImageLoad) << workers.size() << "workers started";
@@ -150,16 +152,19 @@ void ImageLoaderPrivate::worker()
 
         if (rd.fileName().isEmpty()) {
             // Job aborted
+            qCDebug(lcImageLoad) << "job was aborted";
             continue;
         }
 
         QString error;
         auto result = std::make_shared<QImage>(readImage(rd, drawSize, imageSize, error));
+        int count = 0;
         for (auto &weakJob : jobData) {
             auto job = weakJob.lock();
             if (!job) {
                 continue;
             }
+            count++;
             job->stats.tmFinished.restart();
             job->result = result;
             job->resultSize = imageSize;
@@ -167,6 +172,10 @@ void ImageLoaderPrivate::worker()
             if (job->callback) {
                 job->callback(ImageLoaderJob(job));
             }
+        }
+
+        if (!count) {
+            qCDebug(lcImageLoad) << "job finished but nothing is interested anymore";
         }
     }
 }
@@ -198,6 +207,11 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
                       double(imageSize.height()) / drawSize.height());
         factor = qBound(1, qCeil(8/factor), 8);
 
+        // TODO: a few things worth trying:
+        //
+        //   1. patch Qt to allow for exact decoder-only scaling
+        //   2. consider when software scaling is worthwhile to reduce gfx memory usage
+
 #if 0
         //  XXX for huge images this gets really ugly.
         double idealFactor = factor;
@@ -224,7 +238,12 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
 #endif
 
         if (factor < 8) {
-            qCDebug(lcImageLoad) << "Using decoder scaling from" << imageSize << "->" << scaleSize << "for draw size" << drawSize;
+            qint64 waste = (scaleSize.width() * scaleSize.height() * 4) - (drawSize.width() * drawSize.height() * 4);
+            if (scaleSize == scaleSizeF) {
+                qCDebug(lcImageLoad) << "Using accurate decoder scaling from" << imageSize << "->" << scaleSize << "for draw size" << drawSize << "oversized by" << waste/1024 << "KB";
+            } else {
+                qCDebug(lcImageLoad) << "Using bad decoder scaling from" << imageSize << "->" << scaleSize << "for draw size" << drawSize << "oversized by" << waste/1024 << "KB";
+            }
             if (rd.size() != imageSize) {
                 // scaledSize is applied before transform
                 qCDebug(lcImageLoad) << "Swapping dimensions when scaling on a transformed image";
@@ -243,7 +262,7 @@ QImage ImageLoaderPrivate::readImage(QImageReader &rd, const QSize &drawSize, QS
         error = rd.errorString();
         qCDebug(lcImageLoad) << "error loading" << rd.fileName() << error;
     } else {
-        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "for draw size" << drawSize;
+        qCDebug(lcImageLoad) << "loaded" << rd.fileName() << imageSize << "at" << image.size() << "for draw size" << drawSize << "with format" << image.format() << image.hasAlphaChannel();
     }
 
     return image;

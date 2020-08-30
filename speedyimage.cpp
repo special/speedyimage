@@ -55,6 +55,9 @@ QRectF fitContentRect(const QSizeF &box, const QSizeF &content, Qt::Alignment al
     return fit;
 }
 
+// XXX the case where that weird lagging is happening shows normal image load times and such, but the
+// callback times can reach hundreds of ms. main thread busy..?
+
 SpeedyImage::SpeedyImage(QQuickItem *parent)
     : QQuickItem(parent)
     , d(new SpeedyImagePrivate(this))
@@ -201,7 +204,7 @@ QSGNode *SpeedyImage::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
     if (!node) {
         node = window()->createImageNode();
         node->setFiltering(QSGTexture::Linear);
-        node->setMipmapFiltering(QSGTexture::Linear);
+        //node->setMipmapFiltering(QSGTexture::Linear);
     }
     node->setTexture(d->texture.data());
     node->setRect(d->paintRect.toRect());
@@ -400,7 +403,8 @@ void SpeedyImagePrivate::cacheEntryChanged(const QString &key)
     // Reload the image again if drawSize has changed and needs a larger scale
     if (needsReloadForDrawSize())
     {
-        qCDebug(lcItem) << this << "draw size increased while loading, reloading at larger size";
+        qCWarning(lcPerf) << "reloading image after cache loaded at" << cacheEntry.loadedSize()
+                          << "but wanted" << targetLoadSize();
         reloadImage();
     } else {
         qCDebug(lcItem) << this << "loaded image of" << cacheEntry.imageSize() << "as" << cacheEntry.loadedSize()
