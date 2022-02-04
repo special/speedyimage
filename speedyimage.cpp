@@ -123,9 +123,15 @@ QSizeF SpeedyImage::paintedSize() const
     return d->paintRect.size();
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void SpeedyImage::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
+{
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+#else
 void SpeedyImage::geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     QQuickItem::geometryChanged(newGeometry, oldGeometry);
+#endif
 
     QSize size = newGeometry.size().toSize();
     if (size == oldGeometry.size().toSize())

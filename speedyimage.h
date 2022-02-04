@@ -49,7 +49,11 @@ signals:
 
 protected:
     virtual QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *updatePaintNodeData);
-    virtual void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    virtual void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+#else
+    virtual void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+#endif
     virtual void componentComplete();
 
 private:

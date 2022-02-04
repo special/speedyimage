@@ -70,7 +70,7 @@ public:
 
     int getRefCount()
     {
-        return refCount.load();
+        return refCount.loadAcquire();
     }
 
     void updateCost();
