@@ -4,12 +4,12 @@
 
 Q_LOGGING_CATEGORY(lcCache, "speedyimage.cache")
 
-QHash<QQuickWindow*,std::shared_ptr<ImageTextureCache>> ImageTextureCachePrivate::instances;
+QHash<QQuickWindow*,std::weak_ptr<ImageTextureCache>> ImageTextureCachePrivate::instances;
 
 // Only valid on GUI thread
 std::shared_ptr<ImageTextureCache> ImageTextureCache::forWindow(QQuickWindow *window)
 {
-    auto p = ImageTextureCachePrivate::instances.value(window);
+    auto p = ImageTextureCachePrivate::instances.value(window).lock();
     if (!p) {
         p = std::shared_ptr<ImageTextureCache>(new ImageTextureCache(window));
         ImageTextureCachePrivate::instances.insert(window, p);
@@ -37,6 +37,7 @@ ImageTextureCachePrivate::ImageTextureCachePrivate(QQuickWindow *window)
 
 ImageTextureCache::~ImageTextureCache()
 {
+    ImageTextureCachePrivate::instances.remove(d->window);
 }
 
 ImageTextureCachePrivate::~ImageTextureCachePrivate()
